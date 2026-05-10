@@ -1,0 +1,64 @@
+# ══════════════════════════════════════════════════════════════
+# Finance Data Lake — .gitignore
+# Code + schema goes to git. Data files stay local or in Neon DB.
+# ══════════════════════════════════════════════════════════════
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environments ─────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Secrets / Environment ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.secret
+
+# ── Data files (stay local — too large / sensitive) ─────────
+01_Bronze_Raw/
+02_Silver_Cleaned/*.parquet
+03_Gold_DataMarts/*.parquet
+06_Scripts/leadsheet/output/
+*.xlsx
+*.xls
+*.csv
+
+# ── Databases (local only) ───────────────────────────────────
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS / Editor ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Node ─────────────────────────────────────────────────────
+node_modules/
+.next/
+
+# ── Vercel ───────────────────────────────────────────────────
+.vercel/
+
+# ── Streamlit ────────────────────────────────────────────────
+.streamlit/secrets.toml

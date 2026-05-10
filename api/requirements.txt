@@ -1,0 +1,10 @@
+# Vercel deployment — minimal deps (no DuckDB, no Streamlit, no pyarrow)
+fastapi>=0.111.0
+uvicorn>=0.29.0
+pydantic-settings>=2.0.0
+psycopg2-binary>=2.9.0
+pandas>=2.0.0
+numpy>=1.24.0
+openpyxl>=3.1.0
+requests>=2.31.0
+PyYAML>=6.0

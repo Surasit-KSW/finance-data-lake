@@ -1,0 +1,34 @@
+# Finance Data Lake — Python Dependencies
+# Local dev: pip install -r requirements.txt
+# Vercel:    uses api/requirements.txt (minimal, no DuckDB/Streamlit)
+
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0        # Parquet read/write support
+
+# Excel file handling
+openpyxl>=3.1.0        # Read/write Excel (.xlsx)
+xlsxwriter>=3.1.0      # Advanced Excel formatting (charts, conditional format)
+
+# Analytics database (local dev only)
+duckdb>=0.9.0          # In-process OLAP database for Parquet queries
+
+# Dashboard (local dev only)
+streamlit>=1.30.0      # Interactive web dashboards
+
+# Backend API
+fastapi>=0.111.0       # REST API framework
+uvicorn[standard]>=0.29.0  # ASGI server
+sqlalchemy>=2.0.0      # ORM for operations.db (SQLite)
+pydantic-settings>=2.0.0   # Settings management
+
+# Cloud database (Neon PostgreSQL)
+psycopg2-binary>=2.9.0     # PostgreSQL driver (used when DATABASE_URL is set)
+python-dotenv>=1.0.0        # Load .env for local dev + migration scripts
+
+# HTTP client (for lake_client.py)
+requests>=2.31.0
+
+# Config
+PyYAML>=6.0            # YAML config loader (lake_config.py)

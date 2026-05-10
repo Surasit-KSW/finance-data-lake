@@ -1,0 +1,31 @@
+# api_config.yaml
+# ================
+# API server configuration
+# Override with .env file for production/cloud deployment
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true                 # dev mode — set false in production
+  workers: 1                   # increase for production
+
+cors:
+  allow_origins:
+    - "http://localhost:3000"  # main-dashboard Next.js dev
+    - "http://localhost:3001"  # fin-dashboard Next.js dev
+    - "http://localhost:8501"  # Streamlit dashboards
+    - "http://localhost:8502"
+  allow_methods: ["*"]
+  allow_headers: ["*"]
+  # Production: restrict to actual domain
+  # - "https://dashboard.yourdomain.com"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+
+# Cloud deployment targets (for future use)
+cloud:
+  provider: "none"             # none / vercel / railway / render
+  database_url_env: "DATABASE_URL"   # env var name for cloud DB
+  # When DATABASE_URL is set → use PostgreSQL instead of DuckDB

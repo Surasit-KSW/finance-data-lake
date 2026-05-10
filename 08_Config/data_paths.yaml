@@ -1,0 +1,121 @@
+# data_paths.yaml
+# ================
+# Canonical data path registry for Finance Data Lake
+# Source of truth for all projects — never hardcode paths elsewhere
+#
+# Usage in Python:
+#   from scripts.utils.lake_config import LakeConfig
+#   cfg = LakeConfig()
+#   tb_file = cfg.bronze.templates / "AMC_Q12026_Leadsheet STAT to client.xlsx"
+#
+# Usage in Node.js / TypeScript:
+#   Fetch from API: GET /api/v1/health → includes data_lake_root
+
+data_lake_root: "D:/_Work_Workspace/03_Data_Projects/_Finance_Data_Lake"
+
+# ---------------------------------------------------------------------------
+# Bronze Layer — Raw SAP exports (Excel/CSV, never modified)
+# ---------------------------------------------------------------------------
+bronze:
+  root:        "01_Bronze_Raw"
+  templates:   "01_Bronze_Raw/Templates"
+  gl:          "01_Bronze_Raw/GL_Transactions"
+  ar:          "01_Bronze_Raw/AR_Data"
+  ap:          "01_Bronze_Raw/AP_Data"
+  sales:       "01_Bronze_Raw/Sales_Reports"
+  production:  "01_Bronze_Raw/Production"
+  fixed_assets: "01_Bronze_Raw/Fixed_Assets_PPE"
+  inventory:    "01_Bronze_Raw/Inventory_RollStock"
+  deposit:     "01_Bronze_Raw/Deposit"
+
+  # Specific key files
+  files:
+    fbl3n: "01_Bronze_Raw/GL_Transactions/sap_fbl3n.XLSX"
+    leadsheet_q125: "01_Bronze_Raw/Templates/AMC_Q12025_Leadsheet STAT to client.xlsx"
+    leadsheet_q126: "01_Bronze_Raw/Templates/AMC_Q12026_Leadsheet STAT to client_.xlsx"
+    leadsheet_ye25: "01_Bronze_Raw/Templates/AMC Leadsheet YE25.xlsx"
+    tb_mar26: "01_Bronze_Raw/Inventory_RollStock/NRV/AMC_TB_03.2026_v9.XLSX"
+
+# ---------------------------------------------------------------------------
+# Silver Layer — Cleaned Parquet files (typed, validated, no nulls in keys)
+# ---------------------------------------------------------------------------
+silver:
+  root:       "02_Silver_Cleaned"
+  sales:      "02_Silver_Cleaned/master_sales_{year}.parquet"   # {year} = 2023/2024/2025
+  production: "02_Silver_Cleaned/master_production_{year}.parquet"
+  gl:         "02_Silver_Cleaned/Master_GL_24_25.parquet"
+  ar:         "02_Silver_Cleaned/master_ar.parquet"
+
+# ---------------------------------------------------------------------------
+# Gold Layer — Business aggregates (dashboard-ready)
+# ---------------------------------------------------------------------------
+gold:
+  root:       "03_Gold_DataMarts"
+  gl_summary: "03_Gold_DataMarts/Summary_GL_24_25.parquet"
+
+# ---------------------------------------------------------------------------
+# Scripts & Outputs
+# ---------------------------------------------------------------------------
+scripts:
+  leadsheet:  "06_Scripts/leadsheet"
+  audit:      "06_Scripts/audit"
+  reporting:  "06_Scripts/reporting"
+  utils:      "06_Scripts/utils"
+  output:     "06_Scripts/leadsheet/output"
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+database:
+  duckdb: "finance_lake.duckdb"
+  ops_db: "operations.db"
+
+# ---------------------------------------------------------------------------
+# API — Finance Data Lake REST API
+# ---------------------------------------------------------------------------
+api:
+  local_url:    "http://localhost:8000"
+  version:      "v1"
+  prefix:       "/api/v1"
+  docs:         "http://localhost:8000/docs"
+
+  # Endpoints (relative to local_url + prefix)
+  endpoints:
+    health:            "/health"
+    trial_balance:     "/financial/tb/{period}"     # period = YYYY-MM-DD
+    master_tb:         "/financial/master-tb"
+    leadsheet_build:   "/financial/leadsheet/build"
+    gl_transactions:   "/gl/transactions"
+    gl_balance:        "/gl/balance/{account}"
+    ar_aging:          "/audit/ar-aging"
+    sales_summary:     "/sales/summary/{year}"
+    cost_closing:      "/cost-closing/zreport"
+    fi_co_diff:        "/cost-closing/fi-co-diff"
+
+# ---------------------------------------------------------------------------
+# External Projects that connect to this Data Lake
+# ---------------------------------------------------------------------------
+consumers:
+  audit_reconcile:
+    path: "../audit-reconcile"
+    connection: "api"                 # reads via REST API
+    config_file: "config.yaml"
+
+  sap_cost_closing:
+    path: "../sap_cost_closing_app"
+    connection: "api"
+    config_file: ".env"
+
+  main_dashboard:
+    path: "../main-dashboard"
+    connection: "api"
+    env_var: "NEXT_PUBLIC_DATA_LAKE_URL"
+
+  fin_dashboard:
+    path: "../fin-dashboard"
+    connection: "api"
+    env_var: "NEXT_PUBLIC_DATA_LAKE_URL"
+
+  leadsheet:
+    path: "06_Scripts/leadsheet"
+    connection: "local"              # scripts run inside data lake

@@ -1,0 +1,97 @@
+{
+  "_comment": "Related Party & Elimination mapping. Defines IC accounts and entity codes.",
+
+  "entities": {
+    "_note": "เพิ่ม Company Code ของแต่ละบริษัทในกลุ่มเมื่อมีข้อมูล Subsidiary GL",
+    "1000": { "type": "parent",    "label": "AMC (Parent)",       "include_in_stat": true,  "include_in_conso": true },
+    "2000": { "type": "affiliate", "label": "Subsidiary A",       "include_in_stat": false, "include_in_conso": true },
+    "3000": { "type": "affiliate", "label": "Subsidiary B",       "include_in_stat": false, "include_in_conso": true }
+  },
+
+  "ic_balance_accounts": {
+    "ar_affiliate":  { "accounts": ["1121030"], "counterpart_entity_type": "affiliate", "eliminate_against": "ap_affiliate" },
+    "ar_related":    { "accounts": ["1121040"], "counterpart_entity_type": "related",   "eliminate_against": "ap_related" },
+    "ap_affiliate":  { "accounts": ["2121030"], "counterpart_entity_type": "affiliate", "eliminate_against": "ar_affiliate" },
+    "ap_related":    { "accounts": ["2121040"], "counterpart_entity_type": "related",   "eliminate_against": "ar_related" }
+  },
+
+  "ic_transaction_accounts": {
+    "sales_affiliate": { "accounts": ["4111030"], "type": "revenue", "eliminate_against": "cogs_intercompany" },
+    "sales_related":   { "accounts": ["4111040"], "type": "revenue", "eliminate_against": "cogs_intercompany" },
+    "dividend_income": { "accounts": ["4211200"], "type": "income",  "eliminate_against": "dividend_payable" },
+    "dividend_payable":{ "accounts": ["2141140"], "type": "expense", "eliminate_against": "dividend_income" }
+  },
+
+  "elimination_types": {
+    "ic_ar_ap": {
+      "order": 1,
+      "label_th": "ตัดรายการลูกหนี้/เจ้าหนี้ระหว่างกัน",
+      "label_en": "Elimination: Intercompany AR/AP",
+      "debit_accounts":  ["2121030", "2121040"],
+      "credit_accounts": ["1121030", "1121040"]
+    },
+    "ic_revenue_cogs": {
+      "order": 2,
+      "label_th": "ตัดรายการขาย/ต้นทุนระหว่างกัน",
+      "label_en": "Elimination: Intercompany Revenue/COGS",
+      "debit_accounts":  ["4111030", "4111040"],
+      "credit_accounts": []
+    },
+    "ic_dividend": {
+      "order": 3,
+      "label_th": "ตัดรายการเงินปันผลระหว่างกัน",
+      "label_en": "Elimination: Intercompany Dividends",
+      "debit_accounts":  ["4211200"],
+      "credit_accounts": ["2141140"]
+    },
+    "investment_equity": {
+      "order": 4,
+      "label_th": "ตัดรายการเงินลงทุนกับส่วนของผู้ถือหุ้น",
+      "label_en": "Elimination: Investment vs Subsidiary Equity",
+      "debit_accounts":  [],
+      "credit_accounts": ["1211030"],
+      "_note": "ต้องการ subsidiary equity accounts — เพิ่มเมื่อมีข้อมูลงบรวม"
+    }
+  },
+
+  "related_party_disclosure": {
+    "categories": [
+      {
+        "key": "sales_to_related",
+        "label_th": "รายได้จากการขายให้บริษัทที่เกี่ยวข้องกัน",
+        "label_en": "Sales to Related Parties",
+        "accounts": ["4111030", "4111040"]
+      },
+      {
+        "key": "purchases_from_related",
+        "label_th": "ซื้อสินค้าจากบริษัทที่เกี่ยวข้องกัน",
+        "label_en": "Purchases from Related Parties",
+        "accounts": ["2121030", "2121040"]
+      },
+      {
+        "key": "ar_from_related",
+        "label_th": "ลูกหนี้บริษัทที่เกี่ยวข้องกัน",
+        "label_en": "Receivables from Related Parties",
+        "accounts": ["1121030", "1121040"]
+      },
+      {
+        "key": "ap_to_related",
+        "label_th": "เจ้าหนี้บริษัทที่เกี่ยวข้องกัน",
+        "label_en": "Payables to Related Parties",
+        "accounts": ["2121030", "2121040"]
+      },
+      {
+        "key": "dividend_received",
+        "label_th": "เงินปันผลรับ",
+        "label_en": "Dividend Income from Subsidiaries",
+        "accounts": ["4211200"]
+      },
+      {
+        "key": "shareholder_loan",
+        "label_th": "เงินกู้ยืมจากผู้ถือหุ้น",
+        "label_en": "Shareholders Loan",
+        "accounts": ["2112030"]
+      }
+    ]
+  }
+}
