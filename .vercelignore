@@ -1,0 +1,42 @@
+# Data files — large, sensitive, not needed by Vercel (uses Neon PostgreSQL)
+01_Bronze_Raw/
+02_Silver_Cleaned/
+03_Gold_DataMarts/
+finance_lake.duckdb
+operations.db
+*.duckdb
+*.db
+*.xlsx
+*.xls
+*.parquet
+
+# Local dev only (08_Config/ must stay — config.py references it)
+04_Data_Pipelines/
+04_Reports/
+05_Dashboards/
+06_Scripts/
+scripts/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Docs and non-API files
+*.md
+CLAUDE.md
+PIPELINE.md
+WORKSPACE.md
+README.md
+
+# OS / editor
+.DS_Store
+*.log

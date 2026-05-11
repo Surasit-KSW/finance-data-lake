@@ -62,3 +62,6 @@ node_modules/
 
 # ── Streamlit ────────────────────────────────────────────────
 .streamlit/secrets.toml
+
+.vercel
+.env*.local
