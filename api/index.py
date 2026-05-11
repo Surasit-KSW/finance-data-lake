@@ -1,15 +1,17 @@
 """
-api/index.py — Vercel Entry Point (diagnostic minimal version)
+api/index.py — Vercel Entry Point
+Mangum wraps the FastAPI ASGI app for Vercel/Lambda serverless.
 """
 import os
 import sys
 import traceback
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 
-app = FastAPI(title="Finance Data Lake API", version="1.0.0")
+_app = FastAPI(title="Finance Data Lake API", version="1.0.0")
 
-app.add_middleware(
+_app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
@@ -18,41 +20,30 @@ app.add_middleware(
 
 _errors: dict = {}
 
-# Step 1: try settings
-try:
-    from backend.core.config import settings
-    _cfg = {"ok": True, "root": str(settings.PROJECT_ROOT)}
-except Exception:
-    _cfg = {"ok": False, "tb": traceback.format_exc()}
-    _errors["config"] = _cfg["tb"]
-
-# Step 2: try each router independently
+# Load routers
 for _mod in ["health", "gl_detail", "audit_data", "cost_closing", "financial_tb"]:
     try:
         import importlib
         m = importlib.import_module(f"backend.routers.{_mod}")
-        app.include_router(m.router)
-        _errors[_mod] = "ok"
+        _app.include_router(m.router)
     except Exception:
         _errors[_mod] = traceback.format_exc()
 
 
-@app.get("/")
+@_app.get("/")
 def root():
     return {
-        "status": "ok",
-        "python": sys.version,
-        "config": _cfg,
-        "routers": _errors,
+        "service": "Finance Data Lake API",
+        "version": "1.0.0",
+        "health": "/api/v1/health",
+        "docs": "/docs",
+        "db": "postgresql" if os.environ.get("DATABASE_URL") else "duckdb (local)",
+        "startup_errors": _errors or None,
     }
 
 
-@app.get("/ping")
-def ping():
-    return {"pong": True}
+# Vercel/Lambda handler — Mangum adapts ASGI → WSGI/Lambda
+handler = Mangum(_app, lifespan="off")
 
-
-@app.get("/api/v1/health")
-def health_simple():
-    db = "postgresql" if os.environ.get("DATABASE_URL") else "none"
-    return {"status": "ok", "db": db, "routers": _errors}
+# Also expose as 'app' for Vercel's ASGI auto-detection
+app = _app
