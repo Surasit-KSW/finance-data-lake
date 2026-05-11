@@ -32,3 +32,14 @@ requests>=2.31.0
 
 # Config
 PyYAML>=6.0            # YAML config loader (lake_config.py)
+
+# AI / Claude API
+anthropic>=0.40.0      # Claude API (used by telegram bot AI service)
+
+# Telegram Bot
+python-telegram-bot[job-queue]>=20.7   # Async Telegram bot (start_bot.py)
+
+# Google Drive integration (optional — comment out if not using)
+google-api-python-client>=2.120.0      # Google Sheets, Docs, Drive API
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
