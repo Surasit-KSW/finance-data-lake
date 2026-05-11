@@ -1,49 +1,56 @@
 """
 api/index.py — Vercel Entry Point
-Mangum wraps the FastAPI ASGI app for Vercel/Lambda serverless.
+==================================
+FastAPI app exposed to Vercel serverless runtime.
+
+Local dev : uvicorn backend.main:app --reload --port 8000
+Vercel    : auto-detected via vercel.json builds config
+
+Environment variables (set in Vercel dashboard):
+  DATABASE_URL = postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
+  DATA_LAKE_URL = https://your-project.vercel.app   (for lake_client consumers)
 """
-import os
-import sys
-import traceback
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
 
-_app = FastAPI(title="Finance Data Lake API", version="1.0.0")
+from backend.core.config import settings
 
-_app.add_middleware(
+# Cloud-optimised app — only v1 routers, no local-file dependencies
+app = FastAPI(
+    title=settings.API_TITLE,
+    version=settings.API_VERSION,
+    description=(
+        "Finance Data Lake REST API — deployed on Vercel. "
+        "Backed by Neon PostgreSQL when DATABASE_URL is set."
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # restrict per-domain in Vercel env if needed
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-_errors: dict = {}
+# ── Import v1 routers ────────────────────────────────────────────────────────
+from backend.routers import health
+from backend.routers import financial_tb, gl_detail, audit_data, cost_closing
 
-# Load routers
-for _mod in ["health", "gl_detail", "audit_data", "cost_closing", "financial_tb"]:
-    try:
-        import importlib
-        m = importlib.import_module(f"backend.routers.{_mod}")
-        _app.include_router(m.router)
-    except Exception:
-        _errors[_mod] = traceback.format_exc()
+app.include_router(health.router)
+app.include_router(financial_tb.router)
+app.include_router(gl_detail.router)
+app.include_router(audit_data.router)
+app.include_router(cost_closing.router)
 
 
-@_app.get("/")
+@app.get("/")
 def root():
     return {
         "service": "Finance Data Lake API",
-        "version": "1.0.0",
-        "health": "/api/v1/health",
-        "docs": "/docs",
-        "db": "postgresql" if os.environ.get("DATABASE_URL") else "duckdb (local)",
-        "startup_errors": _errors or None,
+        "version": settings.API_VERSION,
+        "docs":    "/docs",
+        "health":  "/api/v1/health",
+        "db":      "postgresql" if settings.use_postgres else "duckdb (local)",
     }
-
-
-# Vercel/Lambda handler — Mangum adapts ASGI → WSGI/Lambda
-handler = Mangum(_app, lifespan="off")
-
-# Also expose as 'app' for Vercel's ASGI auto-detection
-app = _app
