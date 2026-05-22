@@ -106,12 +106,12 @@
 - [ ] เพิ่ม AP/Vendor data (FBL1N)
 - [ ] เพิ่ม Data Catalog endpoint (`/api/v1/catalog`)
 
-### Phase 3 — Separate Concerns
+### Phase 3 — Separate Concerns ✅
 > แยก project ที่ไม่ใช่ Data Layer ออก
 
-- [ ] แยก `telegram_bot/` → `ai/finance-bot/` (consumer ของ API)
-- [ ] แยก `07_Workspace/` → `ai/finance-ops/` (consumer ของ API)
-- [ ] พิจารณาแยก `05_Dashboards/` → standalone project
+- [x] แยก `telegram_bot/` → `ai/finance-bot/` — pure REST API consumer ไม่มี backend import
+- [x] แยก `07_Workspace/` → `ai/finance-ops/workspace/` — Bronze paths ใช้ `DATA_LAKE_ROOT` env var แล้ว
+- [x] `05_Dashboards/` — คงไว้ใน `_Finance_Data_Lake` (อ่าน Parquet โดยตรง + DuckDB dependency)
 
 ### Pending Cleanup (process lock)
 - [ ] ลบ `_web app/` ที่ root — copy อยู่ใน `archive/_web-app/` แล้ว
