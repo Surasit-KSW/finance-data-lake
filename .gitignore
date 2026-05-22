@@ -65,3 +65,8 @@ node_modules/
 
 .vercel
 .env*.local
+
+# ── 07_Workspace (Finance Ops scripts) ──────────────────────
+07_Workspace/02_Working/           # local Excel outputs
+07_Workspace/.credentials/         # Google OAuth token
+client_secret_*.json               # Google OAuth client secret

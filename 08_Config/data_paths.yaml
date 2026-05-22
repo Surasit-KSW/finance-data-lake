@@ -93,6 +93,29 @@ api:
     fi_co_diff:        "/cost-closing/fi-co-diff"
 
 # ---------------------------------------------------------------------------
+# 07_Workspace — Finance Workspace scripts (migrated from _Finance workspace)
+# ---------------------------------------------------------------------------
+workspace:
+  root:      "07_Workspace"
+  reconcile: "07_Workspace/reconcile"
+  cost:      "07_Workspace/cost"
+  monthend:  "07_Workspace/monthend"
+  analytics: "07_Workspace/analytics"
+  utils:     "07_Workspace/utils"
+  config:    "07_Workspace/config"
+  working:   "07_Workspace/02_Working"
+
+  # SAP raw data (shared with bronze layer — same files)
+  prd_gi:    "01_Bronze_Raw/PRD_GI"
+  master:    "01_Bronze_Raw/Master"
+
+  # Google Drive (gspread — OAuth token in 07_Workspace/.credentials/)
+  credentials: "07_Workspace/.credentials/token.json"
+  google_scopes:
+    - "https://www.googleapis.com/auth/spreadsheets"
+    - "https://www.googleapis.com/auth/drive"
+
+# ---------------------------------------------------------------------------
 # External Projects that connect to this Data Lake
 # ---------------------------------------------------------------------------
 consumers:

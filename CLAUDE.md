@@ -93,6 +93,17 @@ _Finance_Data_Lake/
 │       ├── lake_client.py    HTTP client — shared by all consumer projects
 │       └── lake_config.py    Reads 08_Config/data_paths.yaml
 │
+├── 07_Workspace/             Google Sheets scripts (merged from _Finance workspace)
+│   ├── reconcile/            GI recon Plant 1300/1100, format recon
+│   ├── cost/                 MB51 breakdown, electricity alloc AMC/GA, GI templates
+│   ├── monthend/             Month-end costing template generator
+│   ├── analytics/            Analytics (trend, outlier, forecast) → Google Sheets
+│   ├── utils/                gspread auth, Sheets I/O, Drive, finance calc
+│   ├── config/settings.py    Workspace finance constants + Drive IDs
+│   ├── 02_Working/           Local Excel outputs (git-ignored)
+│   └── .credentials/         Google OAuth token (git-ignored)
+│   NOTE: ข้อมูล SAP ใช้ร่วมกับ 01_Bronze_Raw/PRD_GI/ (ไม่ duplicate)
+│
 ├── 08_Config/
 │   ├── data_paths.yaml       Canonical path registry — source of truth for all paths
 │   └── api_config.yaml       API configuration (ports, CORS)
@@ -251,6 +262,45 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 - **Local**: `uvicorn backend.main:app --reload --port 8000`
 - **Vercel**: auto-deploys from GitHub via `vercel.json` → entry point `api/index.py`
 - **Cloud DB**: Neon PostgreSQL — run `scripts/migrate_to_neon.py` monthly after SAP refresh
+
+---
+
+## 07_Workspace — Finance Operations Scripts
+
+สร้างจากการ merge `_Finance workspace` (2026-05-22)
+
+### Quick Start
+```bash
+# Reconciliation Plant 1300
+python 07_Workspace/reconcile/recon_gi_plant1300.py --month 3
+
+# MB51 Cost Breakdown
+python 07_Workspace/cost/mb51_cost_breakdown.py
+
+# Electricity Allocation AMC
+python 07_Workspace/cost/electricity_alloc_amc_v2.py
+
+# Month-End Costing Template
+python 07_Workspace/monthend/generate_monthend_costing_template.py --month 05 --year 2026
+```
+
+### Import Pattern
+Scripts ใน `07_Workspace/` ใช้ `sys.path.insert(0, str(Path(__file__).resolve().parent.parent))`
+เพื่อให้ `from utils.auth import ...` และ `from config.settings import ...` ทำงานได้
+
+### Data Paths
+- **SAP Input:** `01_Bronze_Raw/PRD_GI/` (shared กับ Data Lake pipeline)
+- **Local Output:** `07_Workspace/02_Working/` (Excel files — git-ignored)
+- **Google Sheets Output:** ผ่าน gspread (credentials: `07_Workspace/.credentials/token.json`)
+
+### Environment Variables ที่ต้องการ
+- `DRIVE_ROOT_ID`, `DRIVE_WORKING_ID`, etc. — Google Drive folder IDs
+- `RECON_LOG_SHEET_ID`, `ANALYTICS_LOG_SHEET_ID` — audit log sheets
+
+### Finance Rules (vault-derived)
+- THB, ROUND(x,2), tolerance ±0.01, DD/MM/YYYY
+- GL exclude: 5391020 (ML variance), 5211010 (Semi-FG)
+- Outlier: mean ± 2σ; flag >500K
 
 ---
 

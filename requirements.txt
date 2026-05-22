@@ -39,7 +39,9 @@ anthropic>=0.40.0      # Claude API (used by telegram bot AI service)
 # Telegram Bot
 python-telegram-bot[job-queue]>=20.7   # Async Telegram bot (start_bot.py)
 
-# Google Drive integration (optional — comment out if not using)
+# Google Drive integration (Telegram bot + 07_Workspace scripts)
 google-api-python-client>=2.120.0      # Google Sheets, Docs, Drive API
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
+gspread>=6.1.2                         # Google Sheets direct read/write (07_Workspace)
+tabulate>=0.9.0                        # Pretty-print tables (07_Workspace reports)
