@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import settings
 from backend.core.database import init_ops_db
 from backend.routers import health, lake, finance, sales, ar, etl, reports
-from backend.routers import financial_tb, gl_detail, audit_data, cost_closing
+from backend.routers import financial_tb, gl_detail, audit_data, cost_closing, dashboard
 
 app = FastAPI(
     title=settings.API_TITLE,
@@ -52,6 +52,7 @@ app.include_router(financial_tb.router)   # /api/v1/financial/...
 app.include_router(gl_detail.router)      # /api/v1/gl/...
 app.include_router(audit_data.router)     # /api/v1/audit/...
 app.include_router(cost_closing.router)   # /api/v1/cost-closing/...
+app.include_router(dashboard.router)      # /api/v1/{financial-performance,liquidity,...}
 
 
 @app.on_event("startup")
