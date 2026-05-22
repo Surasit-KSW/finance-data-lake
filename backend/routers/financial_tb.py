@@ -13,7 +13,7 @@ Consumers: leadsheet builder, main-dashboard, fin-dashboard
 import subprocess
 import sys
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Header
 import openpyxl
 
 from backend.core.config import settings
@@ -25,10 +25,17 @@ BRONZE = settings.BRONZE
 TEMPLATES = BRONZE / "Templates"
 NRV_DIR   = BRONZE / "Inventory_RollStock" / "NRV"
 
-# Known TB files keyed by period string
-TB_FILES = {
-    "2026-03-31": NRV_DIR / "AMC_TB_03.2026_v9.XLSX",
-    "2025-12-31": TEMPLATES / "AMC Leadsheet YE25.xlsx",  # extracted from detail sheets
+
+def _latest(directory: Path, pattern: str) -> Path | None:
+    """Return the last (alphabetically) file matching pattern, or None."""
+    matches = sorted(directory.glob(pattern))
+    return matches[-1] if matches else None
+
+
+# TB files keyed by period — versioned filenames resolved via glob at startup
+TB_FILES: dict[str, Path | None] = {
+    "2026-03-31": _latest(NRV_DIR, "AMC_TB_03.2026_v*.XLSX"),
+    "2025-12-31": TEMPLATES / "AMC Leadsheet YE25.xlsx",
 }
 
 LEADSHEET_SCRIPT = settings.PROJECT_ROOT / "06_Scripts" / "leadsheet" / "build_q1_2026_leadsheet.py"
@@ -219,11 +226,18 @@ def get_master_tb():
 
 
 @router.post("/leadsheet/build")
-def trigger_leadsheet_build(background_tasks: BackgroundTasks):
+def trigger_leadsheet_build(
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(None),
+):
     """
     Trigger the Q1'2026 leadsheet builder script in the background.
     Returns immediately; check /api/v1/health for status.
+    Requires X-Api-Key header when LEADSHEET_API_KEY is set in .env.
     """
+    if settings.LEADSHEET_API_KEY and x_api_key != settings.LEADSHEET_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Api-Key")
+
     if not LEADSHEET_SCRIPT.exists():
         raise HTTPException(
             status_code=503,

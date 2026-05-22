@@ -33,6 +33,7 @@ VIEWS = {
     "v_sales": os.path.join(SILVER, "master_sales_*.parquet"),
     "v_production": os.path.join(SILVER, "master_production_*.parquet"),
     "v_gl": os.path.join(SILVER, "Master_GL_24_25.parquet"),
+    "v_ar": os.path.join(SILVER, "master_ar.parquet"),
 
     # Gold views — aggregated summaries
     "v_gl_summary": os.path.join(GOLD, "Summary_GL_24_25.parquet"),

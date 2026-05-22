@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # Set DATABASE_URL="postgresql://user:pass@host:5432/db" for cloud.
     DATABASE_URL: str = ""
 
+    # ── API Keys ─────────────────────────────────────────────
+    # Set LEADSHEET_API_KEY in .env to protect /leadsheet/build.
+    # Leave empty to allow unauthenticated access (local dev).
+    LEADSHEET_API_KEY: str = ""
+
     # ── CORS ─────────────────────────────────────────────────
     CORS_ORIGINS: list = [
         "http://localhost:3000",   # main-dashboard Next.js
