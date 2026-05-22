@@ -36,13 +36,14 @@ app.add_middleware(
 
 # ── Import v1 routers ────────────────────────────────────────────────────────
 from backend.routers import health
-from backend.routers import financial_tb, gl_detail, audit_data, cost_closing
+from backend.routers import financial_tb, gl_detail, audit_data, cost_closing, dashboard
 
 app.include_router(health.router)
 app.include_router(financial_tb.router)
 app.include_router(gl_detail.router)
 app.include_router(audit_data.router)
 app.include_router(cost_closing.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/")

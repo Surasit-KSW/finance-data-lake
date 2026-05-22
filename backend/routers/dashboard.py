@@ -30,7 +30,7 @@ Limitations:
 """
 
 from fastapi import APIRouter, Query, HTTPException
-from backend.services.duck_service import query_df
+from backend.services.db_service import query_df
 
 router = APIRouter(prefix="/api/v1", tags=["Dashboard"])
 
@@ -69,10 +69,11 @@ def _gl_prefix_cumulative(year: int, month: int) -> dict[str, float]:
     Return {account_prefix_2char: cumulative_net_amount} for all months
     up to and including year-month.
     Used for balance sheet approximation (no opening balance available).
+    Uses SUBSTRING (PostgreSQL-compatible alias for SUBSTR).
     """
     df = query_df(
         """
-        SELECT SUBSTR("G/L Account", 1, 2) AS prefix, SUM(Net_Amount) AS balance
+        SELECT SUBSTRING("G/L Account" FROM 1 FOR 2) AS prefix, SUM(Net_Amount) AS balance
         FROM v_gl_summary
         WHERE (CAST(Year AS INTEGER) < ?)
            OR (CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) <= ?)
@@ -261,14 +262,15 @@ def get_cash_flow(
     year, month = _parse_period(period)
 
     # Closing = YTD cumulative 11* from Jan of same year to this month
+    # Use parameterized LIKE to avoid psycopg2 % escaping issues
     df_close = query_df(
         """
         SELECT SUM(Net_Amount) AS ytd_cash
         FROM v_gl_summary
         WHERE CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) <= ?
-          AND "G/L Account" LIKE '11%'
+          AND "G/L Account" LIKE ?
         """,
-        [year, month],
+        [year, month, "11%"],
     )
     closing_raw = float(df_close["ytd_cash"].iloc[0] or 0.0) if not df_close.empty else 0.0
 
@@ -281,9 +283,9 @@ def get_cash_flow(
             SELECT SUM(Net_Amount) AS ytd_cash
             FROM v_gl_summary
             WHERE CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) <= ?
-              AND "G/L Account" LIKE '11%'
+              AND "G/L Account" LIKE ?
             """,
-            [year, month - 1],
+            [year, month - 1, "11%"],
         )
         opening_raw = float(df_open["ytd_cash"].iloc[0] or 0.0) if not df_open.empty else 0.0
 

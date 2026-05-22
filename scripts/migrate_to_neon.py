@@ -159,7 +159,7 @@ def main():
 
     print("Loading Gold tables:")
     for f in gold_files:
-        table_name = f.stem.lower()   # e.g. gold_cashflow, summary_gl_24_25
+        table_name = f.stem.lower()   # e.g. gold_cashflow, summary_gl_24_25, v_gl_summary
         df = pd.read_parquet(f)
         load_gold_table(conn, table_name, df, f.name)
 
