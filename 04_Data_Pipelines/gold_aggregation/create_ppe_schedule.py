@@ -30,7 +30,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 DUCK_DB     = os.path.join(PROJECT_ROOT, "finance_lake.duckdb")
 GOLD_DIR    = os.path.join(PROJECT_ROOT, "03_Gold_DataMarts")
 SILVER_DIR  = os.path.join(PROJECT_ROOT, "02_Silver_Cleaned")
-CFG_DIR     = os.path.join(PROJECT_ROOT, "config")
+CFG_DIR     = os.path.join(PROJECT_ROOT, "08_Config")
 
 PPE_SILVER  = os.path.join(SILVER_DIR, "master_ppe.parquet")
 OUT_FILE    = os.path.join(GOLD_DIR, "gold_ppe.parquet")

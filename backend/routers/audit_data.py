@@ -6,12 +6,11 @@ Audit & reconciliation endpoints — /api/v1/audit/...
 Consumers: audit-reconcile project, main-dashboard
 
 SQL is written to be compatible with both DuckDB (local) and PostgreSQL (Vercel).
-  - EXTRACT(YEAR FROM col) instead of strftime('%Y', col)
+  - EXTRACT(YEAR FROM col) works on both — do NOT use strftime()
   - ? params (db_service converts to %s for PostgreSQL automatically)
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from backend.services.db_service import query_df
-from backend.core.config import settings
 
 router = APIRouter(prefix="/api/v1/audit", tags=["Audit v1"])
 
@@ -26,19 +25,10 @@ def ar_aging(
     AR Aging report — buckets: current, 30, 60, 90, 90+ days
     Source: v_ar (Silver layer or PostgreSQL table)
     """
-    if settings.use_postgres:
-        # PostgreSQL: use EXTRACT and standard date functions
-        conditions = [
-            "EXTRACT(YEAR  FROM \"Invoice Date\")::int <= ?",
-            "EXTRACT(MONTH FROM \"Invoice Date\")::int <= ?",
-        ]
-    else:
-        # DuckDB: strftime works fine
-        conditions = [
-            "CAST(strftime('%Y', \"Invoice Date\") AS INT) <= ?",
-            "CAST(strftime('%m', \"Invoice Date\") AS INT) <= ?",
-        ]
-
+    conditions = [
+        "EXTRACT(YEAR  FROM \"Invoice Date\")::int <= ?",
+        "EXTRACT(MONTH FROM \"Invoice Date\")::int <= ?",
+    ]
     params: list = [as_of_year, as_of_month]
 
     if customer:
@@ -46,27 +36,23 @@ def ar_aging(
         params.append(f"%{customer}%")
 
     where = " AND ".join(conditions)
-    try:
-        df = query_df(
-            f"""
-            SELECT
-                "Customer Code"  AS customer_code,
-                "Customer Name"  AS customer_name,
-                "Invoice No"     AS invoice_no,
-                "Invoice Date"   AS invoice_date,
-                "Due Date"       AS due_date,
-                "Outstanding"    AS outstanding_amount,
-                "Aging Bucket"   AS aging_bucket
-            FROM v_ar
-            WHERE {where}
-            ORDER BY "Outstanding" DESC
-            LIMIT 2000
-            """,
-            params,
-        )
-    except Exception:
-        df = query_df("SELECT * FROM v_ar LIMIT 1000")
-
+    df = query_df(
+        f"""
+        SELECT
+            "Customer Code"  AS customer_code,
+            "Customer Name"  AS customer_name,
+            "Invoice No"     AS invoice_no,
+            "Invoice Date"   AS invoice_date,
+            "Due Date"       AS due_date,
+            "Outstanding"    AS outstanding_amount,
+            "Aging Bucket"   AS aging_bucket
+        FROM v_ar
+        WHERE {where}
+        ORDER BY "Outstanding" DESC
+        LIMIT 2000
+        """,
+        params,
+    )
     return {
         "status": "ok",
         "count":  len(df),
@@ -77,29 +63,20 @@ def ar_aging(
 @router.get("/ar-summary")
 def ar_summary(year: int = Query(2025)):
     """AR aging summary by customer — top 20 overdue"""
-    if settings.use_postgres:
-        year_filter = "EXTRACT(YEAR FROM \"Invoice Date\")::int = ?"
-    else:
-        year_filter = "CAST(strftime('%Y', \"Invoice Date\") AS INT) = ?"
-
-    try:
-        df = query_df(
-            f"""
-            SELECT
-                "Customer Name"     AS customer,
-                SUM("Outstanding")  AS total_outstanding,
-                COUNT(*)            AS invoice_count
-            FROM v_ar
-            WHERE {year_filter}
-            GROUP BY "Customer Name"
-            ORDER BY total_outstanding DESC
-            LIMIT 20
-            """,
-            [year],
-        )
-    except Exception:
-        df = query_df("SELECT * FROM v_ar LIMIT 10")
-
+    df = query_df(
+        """
+        SELECT
+            "Customer Name"     AS customer,
+            SUM("Outstanding")  AS total_outstanding,
+            COUNT(*)            AS invoice_count
+        FROM v_ar
+        WHERE EXTRACT(YEAR FROM "Invoice Date")::int = ?
+        GROUP BY "Customer Name"
+        ORDER BY total_outstanding DESC
+        LIMIT 20
+        """,
+        [year],
+    )
     return {
         "status": "ok",
         "year":   year,

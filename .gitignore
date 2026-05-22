@@ -29,6 +29,7 @@ env/
 01_Bronze_Raw/
 02_Silver_Cleaned/*.parquet
 03_Gold_DataMarts/*.parquet
+04_Reports/                    # output Excel reports — local only
 06_Scripts/leadsheet/output/
 *.xlsx
 *.xls

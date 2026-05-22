@@ -10,7 +10,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 ROOT     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DUCK_DB  = os.path.join(ROOT, "finance_lake.duckdb")
-CFG      = os.path.join(ROOT, "config")
+CFG      = os.path.join(ROOT, "08_Config")
 OUT_DIR  = os.path.join(ROOT, "03_Gold_DataMarts")
 OUT_FILE = os.path.join(OUT_DIR, "Leadsheet_YE2025_STAT.xlsx")
 
