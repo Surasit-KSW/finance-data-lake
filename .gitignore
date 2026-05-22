@@ -67,7 +67,13 @@ node_modules/
 .vercel
 .env*.local
 
+# ── Claude Code internal files ───────────────────────────────
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # ── 07_Workspace (Finance Ops scripts) ──────────────────────
-07_Workspace/02_Working/           # local Excel outputs
-07_Workspace/.credentials/         # Google OAuth token
-client_secret_*.json               # Google OAuth client secret
+# local Excel outputs
+07_Workspace/02_Working/
+# Google OAuth token + client secret
+07_Workspace/.credentials/
+client_secret_*.json
