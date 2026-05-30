@@ -8,6 +8,12 @@ Consumers: sap_cost_closing_app (Streamlit)
 Note: sap_cost_closing_app currently reads CSV files from its local data/processed/.
       These endpoints expose the same data via API so the app can optionally
       read from the Data Lake instead of maintaining its own copies.
+
+# TODO (tech-debt): /zreport and /fi-co-diff read CSV from sap_cost_closing_app/data/processed/
+#   which is outside the Bronze→Silver→Gold pipeline.
+#   Future: add ETL for cost closing data → 02_Silver_Cleaned/master_cost_closing.parquet
+#   then route queries through db_service.query_df() like /production-cost does.
+#   Tracked in: _Finance-Vault/08-Context/Standards/data-lake-organization.md
 """
 from pathlib import Path
 from fastapi import APIRouter, Query, HTTPException

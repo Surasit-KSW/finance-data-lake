@@ -14,6 +14,17 @@
 data_lake_root: "D:/_Work_Workspace/03_Data_Projects/_Finance_Data_Lake"
 
 # ---------------------------------------------------------------------------
+# LAYER RULES (Architecture — see Standards/data-lake-organization.md)
+# ---------------------------------------------------------------------------
+#   Bronze  → Read-only SAP exports. ETL scripts read here. API must NOT read directly.
+#   Silver  → Cleaned Parquet from ETL. API queries via DuckDB views. Not in git.
+#   Gold    → Pre-aggregated KPIs. API reads directly. Not in git.
+#   API     → Must only read Silver/Gold (never Bronze).
+#   Scripts → 06_Scripts/audit|reporting|leadsheet reads Silver/Gold, outputs to 04_Reports/
+#   Workspace → 07_Workspace/ reads Silver/Gold + Bronze/PRD_GI, outputs to Google Sheets.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Bronze Layer — Raw SAP exports (Excel/CSV, never modified)
 # ---------------------------------------------------------------------------
 bronze:

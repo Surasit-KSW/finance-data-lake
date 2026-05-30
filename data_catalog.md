@@ -1,59 +1,68 @@
 # Finance Data Lake — Data Catalog
 
-อัพเดตล่าสุด: 2026-05-06
+อัพเดตล่าสุด: 2026-05-31
 โครงสร้าง: Medallion Architecture (Bronze → Silver → Gold)
 
 ---
 
 ## Bronze Layer — `01_Bronze_Raw/` (Raw SAP Exports)
 
+> Read-only — ห้ามแก้ไข ห้าม API อ่านโดยตรง
+
 | Folder | ไฟล์ตัวอย่าง | Period | Source | หมายเหตุ |
 |--------|------------|--------|--------|---------|
-| `AR_Data/` | AR_2024.XLSX, AR_2025.XLSX | 2024–2025 | SAP FBL5N | Accounts Receivable open items |
+| `GL_Transactions/` | `sap_fbl3n.XLSX` | 2024–2025 | SAP FBL3N | Replace in-place ทุกเดือน |
+| `Sales_Reports/{YYYY}/` | `sale_2025_01.XLSX` | 2023–2025 | SAP VF05/SD | 12 ไฟล์/ปี — add monthly |
+| `Production/{YYYY}/` | `1100_2025_01.XLSX` | 2023–2025 | SAP MB52/CO | 24–28 ไฟล์/ปี (plants 1100, 1200, 1300) |
+| `AR_Data/` | `AR_2024.XLSX`, `AR_2025.XLSX` | 2024–2025 | SAP FBL5N | Accounts Receivable open items |
 | `AP_Data/` | *(ยังว่างอยู่)* | — | SAP FBL1N | รอข้อมูล Accounts Payable |
-| `GL_Transactions/` | sap_fbl3n.XLSX | 2024–2025 | SAP FBL3N | General Ledger transactions |
-| `Production/2023/` | 1100_2023_01.XLSX | 2023 | SAP MB52/MIGO | Plant 1100, 1200 (72 files) |
-| `Production/2024/` | 1100_2024_01.XLSX | 2024 | SAP MB52/MIGO | Plant 1100, 1200 (72 files) |
-| `Production/2025/` | 1100_2025_01.XLSX | 2025 | SAP MB52/MIGO | Plant 1100, 1200, **1300** (84 files) |
-| `Sales_Reports/2023/` | sale_2023_01.XLSX | 2023 | SAP VF05/SD | Monthly sales billing (12 files) |
-| `Sales_Reports/2024/` | sale_2024_01.XLSX | 2024 | SAP VF05/SD | Monthly sales billing (12 files) |
-| `Sales_Reports/2025/` | sale_2025_01.XLSX | 2025 | SAP VF05/SD | Monthly sales billing (12 files) |
+| `Inventory_RollStock/NRV/` | `AMC_TB_03.2026_v9.XLSX` | 2025–2026 | ZFI_TB | Trial Balance — หลาย version/period |
+| `Templates/` | `AMC_Q12026_Leadsheet STAT to client_.xlsx` | — | — | Leadsheet templates + Excel forms |
+| `Leadsheet/` | — | — | — | Leadsheet working files |
+| `monthend/` | `GA_2200_*.XLSX` | — | SAP KSB1/CO | Month-end CO analysis files |
+| `PRD_GI/` | — | — | SAP MB51 | Production GI data (shared กับ 07_Workspace) |
+| `Master/` | `KS13_Master.XLSX` | — | SAP KS13 | Cost center master data |
 | `Fixed_Assets_PPE/` | *(ยังว่างอยู่)* | — | SAP AR03 | รอข้อมูล Fixed Assets |
-| `Inventory_RollStock/` | *(ยังว่างอยู่)* | — | SAP MB52 | รอข้อมูล Inventory Roll-Forward |
+| `Deposit/` | — | — | Bank | Bank deposit data |
 
 ---
 
 ## Silver Layer — `02_Silver_Cleaned/` (Cleaned Parquet)
 
-### master_sales_YYYY.parquet (3 files: 2023, 2024, 2025)
-**DuckDB view:** `v_sales`, `v_sales_2023`, `v_sales_2024`, `v_sales_2025`
-**Source:** ETL → `04_Data_Pipelines/silver_transform/etl_sales.py`
+> Output ของ ETL scripts — ไม่ commit ใน git (regenerate ได้จาก Bronze)
+
+### master_sales_YYYY.parquet (3 ไฟล์: 2023, 2024, 2025)
+**DuckDB view:** `v_sales` (wildcard), `v_sales_2023`, `v_sales_2024`, `v_sales_2025`
+**ETL:** `04_Data_Pipelines/silver_transform/etl_sales.py`
 
 | Column | Type | หมายเหตุ |
 |--------|------|---------|
 | Source_File | string | ชื่อไฟล์ต้นทาง (audit trail) |
 | Year | int | ปี (เพิ่มโดย ETL) |
 | Month | int | เดือน 1–12 (เพิ่มโดย ETL) |
-| *columns จาก SAP SD* | varies | billing doc, material, qty, net value, customer |
+| *columns จาก SAP VF05* | varies | billing doc, material, qty, net value, customer |
 
 ---
 
-### master_production_YYYY.parquet (3 files: 2023, 2024, 2025)
-**DuckDB view:** `v_production`, `v_production_2023`, `v_production_2024`, `v_production_2025`
-**Source:** ETL → `04_Data_Pipelines/silver_transform/etl_production.py`
+### master_production_YYYY.parquet (3 ไฟล์: 2023, 2024, 2025)
+**DuckDB view:** `v_production` (wildcard), `v_production_2023`, `v_production_2024`, `v_production_2025`
+**ETL:** `04_Data_Pipelines/silver_transform/etl_production.py`
 
 | Column | Type | หมายเหตุ |
 |--------|------|---------|
 | Source_File | string | ชื่อไฟล์ต้นทาง (Plant_Year_Month) |
-| *columns จาก SAP* | varies | plant, material group, qty_kg, cost allocation |
+| Year | int | ปี |
+| Month | int | เดือน |
+| Plant | string | 1100, 1200, 1300 |
+| *columns จาก SAP MB52/CO* | varies | material group, qty_kg, cost allocation |
 
-**Plants:** 1100, 1200 (2023–2025), 1300 (Jul 2025 เป็นต้นไป)
+**Plants:** 1100 + 1200 (2023–2025), 1300 (2025)
 
 ---
 
 ### Master_GL_24_25.parquet (~82 MB)
 **DuckDB view:** `v_gl`
-**Source:** ETL → `04_Data_Pipelines/silver_transform/etl_gl.py`
+**ETL:** `04_Data_Pipelines/silver_transform/etl_gl.py`
 
 | Column | Type | หมายเหตุ |
 |--------|------|---------|
@@ -62,9 +71,10 @@
 
 ---
 
-### master_ar.parquet *(สร้างโดย etl_ar.py)*
-**DuckDB view:** `v_ar` *(จะมีหลังรัน init_duckdb.py)*
-**Source:** ETL → `04_Data_Pipelines/silver_transform/etl_ar.py`
+### master_ar.parquet ⚠️ ยังไม่มีไฟล์
+**DuckDB view:** `v_ar` *(สร้างได้เมื่อรัน etl_ar.py)*
+**ETL:** `04_Data_Pipelines/silver_transform/etl_ar.py`
+**Status:** ต้องรัน `python run_pipeline.py --layer silver --domain ar` ก่อน
 
 | Column | Type | หมายเหตุ |
 |--------|------|---------|
@@ -73,74 +83,188 @@
 
 ---
 
-### อื่นๆ ใน Silver Layer
+### ไฟล์อื่นๆ ใน Silver Layer (output จาก 06_Scripts)
 
-| ไฟล์ | คำอธิบาย |
-|------|---------|
-| `AR_Sales_Analytics_2023_2025.xlsx` | Multi-year AR & Sales analytics (สร้างโดย audit_ar_sales.py) |
-| `Production_Summary_Plant_MatGroup.xlsx` | Production summary by plant & material group |
-| `reconciled_tax_with_groups.xlsx` | AP tax reconciliation (3 sheets: All, Outstanding, Matched) |
-| `archive/` | Timestamped Excel outputs เก่า (เก็บไว้ reference) |
+| ไฟล์ | คำอธิบาย | สร้างโดย |
+|------|---------|---------|
+| `AR_Sales_Analytics_2023_2025.xlsx` | AR & Sales analytics หลายปี (DSO, growth) | `audit_ar_sales.py` |
+| `Production_Summary_Plant_MatGroup.xlsx` | Production summary by plant & material group | `audit_production_yoy.py` |
+| `reconciled_tax_with_groups.xlsx` | AP tax reconciliation (3 sheets: All/Outstanding/Matched) | `reconcile_tax.py` |
+| `archive/` | Timestamped Excel outputs เก่า (เก็บไว้ reference) | — |
 
 ---
 
 ## Gold Layer — `03_Gold_DataMarts/` (Business-Ready)
 
+> Output ของ aggregation scripts — ไม่ commit ใน git
+
 ### Summary_GL_24_25.parquet
 **DuckDB view:** `v_gl_summary`
-**Source:** `04_Data_Pipelines/gold_aggregation/create_gold_summary.py`
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_gold_summary.py`
 
 | Column | Type | หมายเหตุ |
 |--------|------|---------|
-| GL_Group | string | หมวดหมู่บัญชี (เช่น ต้นทุน, รายได้) |
+| GL_Group | string | หมวดหมู่บัญชี (ต้นทุน, รายได้, ฯลฯ) |
 | G/L Account | string | รหัส GL account |
 | GL_Name | string | ชื่อบัญชี |
 | Period | int | เดือน 1–12 |
 | Year | int | ปี |
 | Net_Amount | float | ยอดสุทธิ |
 
-**ใช้ใน:** `05_Dashboards/app_01_audit_analytics.py` (YoY Variance & Drill-Down)
+---
+
+### gold_leadsheet.parquet
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_leadsheet.py`
+**รัน:** `python -m 04_Data_Pipelines.gold_aggregation.create_leadsheet --year 2025 --quarter Q1`
+
+| Column | Type | หมายเหตุ |
+|--------|------|---------|
+| year, quarter, period_end | int/str/date | ช่วงเวลา |
+| entity_type | string | `stat` = งบเดี่ยว, `conso` = งบรวม |
+| section, section_label_th/en, section_order | string/int | หมวด BS/PL |
+| line_key, line_label_th/en, line_order | string/int | บรรทัด |
+| gl_account, account_name | string | รหัส + ชื่อ GL |
+| amount_raw | float | ยอดก่อนปรับ |
+| amount_presented | float | ยอดหลังปรับ (นำเสนอในงบ) |
+| currency | string | THB |
 
 ---
 
-### อื่นๆ ใน Gold Layer
+### gold_cashflow.parquet
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_cashflow.py`
+**Dependency:** ต้องรัน `create_leadsheet.py` ก่อน
+**รัน:** `python -m 04_Data_Pipelines.gold_aggregation.create_cashflow --year 2025 --quarter Q1`
 
-| ไฟล์ | คำอธิบาย |
-|------|---------|
-| `Audit_Sales_Summary_23_24_25.xlsx` | Sales audit ปี 2023–2025 (สร้างโดย audit_sales_summary.py) |
-| `Audit_Sales_Analysis_2025_v2.xlsx` | Product mix & customer frequency 2025 |
-| `Audit_Sales_Analysis_2025.xlsx` | Sales analysis 2025 (เวอร์ชันก่อนหน้า) |
+| Column | Type | หมายเหตุ |
+|--------|------|---------|
+| year, quarter, period_end | int/str/date | ช่วงเวลา |
+| entity_type | string | stat / conso |
+| section, section_label_th/en, section_order | string/int | Operating / Investing / Financing |
+| line_key, line_label_th/en, line_order | string/int | รายการ |
+| amount | float | ยอด THB |
+| currency | string | THB |
+
+**Logic:** Indirect method — Net Income → บวกกลับ non-cash → Working Capital changes → Investing/Financing
 
 ---
 
-## DuckDB Views สรุป
+### gold_ppe.parquet
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_ppe_schedule.py`
+**รัน:** `python -m 04_Data_Pipelines.gold_aggregation.create_ppe_schedule --year 2025 --quarter Q1`
 
-รัน `python 04_Data_Pipelines/init_duckdb.py` เพื่อสร้าง/อัพเดตทุก view
+| Column | Type | หมายเหตุ |
+|--------|------|---------|
+| year, quarter, period_end | int/str/date | ช่วงเวลา |
+| entity_type | string | stat / conso |
+| asset_class, class_label_th/en, class_order | string/int | ประเภทสินทรัพย์ |
+| movement_type | string | cost / accum_dep / net_book_value |
+| movement_label | string | Opening / Additions / Disposals / Depreciation / Closing |
+| amount | float | ยอด THB |
+| currency | string | THB |
+
+**Note:** ถ้ายังไม่มี `master_ppe.parquet` (ETL จาก SAP AR02) จะ fallback อ่านจาก `v_gl` แทน
+
+---
+
+### gold_elimination.parquet
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_elimination.py`
+**Dependency:** ต้องรัน `create_leadsheet.py` ก่อน
+**รัน:** `python -m 04_Data_Pipelines.gold_aggregation.create_elimination --year 2025 --quarter Q1`
+
+| Column | Type | หมายเหตุ |
+|--------|------|---------|
+| year, quarter, period_end | int/str/date | ช่วงเวลา |
+| elim_type, elim_label_th/en, elim_order | string/int | ประเภท elimination |
+| account, account_name | string | รหัส + ชื่อ GL |
+| dr_amount, cr_amount, net_amount | float | ยอด Dr/Cr/สุทธิ |
+| note | string | หมายเหตุ |
+| currency | string | THB |
+
+**Note:** ปัจจุบัน parent-only IC — รอข้อมูล subsidiary GL เพื่อทำ full consolidation
+
+---
+
+### gold_related_party.parquet
+**ETL:** `04_Data_Pipelines/gold_aggregation/create_related_party.py`
+**รัน:** `python -m 04_Data_Pipelines.gold_aggregation.create_related_party --year 2025 --quarter Q1`
+
+| Column | Type | หมายเหตุ |
+|--------|------|---------|
+| year, quarter, period_end | int/str/date | ช่วงเวลา |
+| category_key, category_label_th/en | string | หมวดหมู่ related party |
+| account, account_name | string | รหัส + ชื่อ GL |
+| amount | float | ยอด THB |
+| currency | string | THB |
+| data_type | string | `transaction` หรือ `balance` |
+
+---
+
+### ไฟล์อื่นๆ ใน Gold Layer (Excel outputs)
+
+| ไฟล์ | คำอธิบาย | สร้างโดย |
+|------|---------|---------|
+| `Leadsheet_YE2025_STAT.xlsx` | Year-end 2025 leadsheet (งบเดี่ยว) | `06_Scripts/leadsheet/build_q1_2026_leadsheet.py` |
+| `Audit_Sales_Summary_23_24_25.xlsx` | Sales audit ปี 2023–2025 | `audit_sales_summary.py` |
+| `Audit_Sales_Analysis_2025_v2.xlsx` | Product mix & customer frequency 2025 | `app_01_sales_analytics.py` |
+| `Audit_Sales_Analysis_2025.xlsx` | Sales analysis 2025 (เวอร์ชันก่อนหน้า) | — |
+| `v_gl_summary.parquet` | Alias ของ Summary_GL_24_25 (legacy) | — |
+
+---
+
+## DuckDB Views (`finance_lake.duckdb`)
+
+รัน `python run_pipeline.py --init-db` หรือ `python 04_Data_Pipelines/init_duckdb.py` เพื่อสร้าง/อัพเดต
 
 | View | Source Parquet | หมายเหตุ |
 |------|--------------|---------|
-| `v_sales` | master_sales_*.parquet | ทุกปีรวมกัน |
-| `v_sales_2023` | master_sales_2023.parquet | เฉพาะปี 2023 |
-| `v_sales_2024` | master_sales_2024.parquet | เฉพาะปี 2024 |
-| `v_sales_2025` | master_sales_2025.parquet | เฉพาะปี 2025 |
-| `v_production` | master_production_*.parquet | ทุกปีรวมกัน |
-| `v_production_2023` | master_production_2023.parquet | เฉพาะปี 2023 |
-| `v_production_2024` | master_production_2024.parquet | เฉพาะปี 2024 |
-| `v_production_2025` | master_production_2025.parquet | เฉพาะปี 2025 |
-| `v_gl` | Master_GL_24_25.parquet | GL transactions 2024–2025 |
-| `v_gl_summary` | Summary_GL_24_25.parquet | GL summary (Gold) |
+| `v_gl` | `02_Silver_Cleaned/Master_GL_24_25.parquet` | GL transactions 2024–2025 |
+| `v_gl_summary` | `03_Gold_DataMarts/Summary_GL_24_25.parquet` | GL summary aggregated (Gold) |
+| `v_sales` | `02_Silver_Cleaned/master_sales_*.parquet` | ทุกปีรวมกัน (wildcard) |
+| `v_sales_2023` | `master_sales_2023.parquet` | เฉพาะปี 2023 |
+| `v_sales_2024` | `master_sales_2024.parquet` | เฉพาะปี 2024 |
+| `v_sales_2025` | `master_sales_2025.parquet` | เฉพาะปี 2025 |
+| `v_production` | `02_Silver_Cleaned/master_production_*.parquet` | ทุกปีรวมกัน (wildcard) |
+| `v_production_2023` | `master_production_2023.parquet` | เฉพาะปี 2023 |
+| `v_production_2024` | `master_production_2024.parquet` | เฉพาะปี 2024 |
+| `v_production_2025` | `master_production_2025.parquet` | เฉพาะปี 2025 |
+| `v_ar` | `02_Silver_Cleaned/master_ar.parquet` | ⚠️ ข้าม — ไฟล์ยังไม่มี |
+
+**หมายเหตุ:** Gold Parquets (gold_leadsheet, gold_cashflow, gold_ppe, gold_elimination, gold_related_party) ไม่ได้เป็น DuckDB view — อ่านโดยตรงด้วย `pd.read_parquet()`
 
 ---
 
-## Script Directory — `06_Scripts/`
+## Script Directory
 
-### audit/ — Ad-hoc analysis scripts
+### `04_Data_Pipelines/silver_transform/` — Bronze → Silver ETL
+
+| Script | Source | Output |
+|--------|--------|--------|
+| `etl_gl.py` | `01_Bronze_Raw/GL_Transactions/*.XLSX` | `Master_GL_24_25.parquet` |
+| `etl_sales.py --year YYYY` | `01_Bronze_Raw/Sales_Reports/YYYY/*.XLSX` | `master_sales_YYYY.parquet` |
+| `etl_production.py --year YYYY` | `01_Bronze_Raw/Production/YYYY/*.XLSX` | `master_production_YYYY.parquet` |
+| `etl_ar.py` | `01_Bronze_Raw/AR_Data/*.XLSX` | `master_ar.parquet` *(ยังไม่รัน)* |
+
+### `04_Data_Pipelines/gold_aggregation/` — Silver → Gold
+
+| Script | Dependency | Output |
+|--------|-----------|--------|
+| `create_gold_summary.py` | `v_gl` | `Summary_GL_24_25.parquet` |
+| `create_leadsheet.py` | TB Excel files + GL mapping | `gold_leadsheet.parquet` |
+| `create_cashflow.py` | `gold_leadsheet.parquet` | `gold_cashflow.parquet` |
+| `create_ppe_schedule.py` | `v_gl` (หรือ `master_ppe.parquet`) | `gold_ppe.parquet` |
+| `create_elimination.py` | `gold_leadsheet.parquet` + `v_gl` | `gold_elimination.parquet` |
+| `create_related_party.py` | `v_gl` + GL mapping | `gold_related_party.parquet` |
+
+---
+
+### `06_Scripts/audit/` — Ad-hoc Analysis
+
 | Script | วัตถุประสงค์ |
 |--------|------------|
 | `audit_ar_sales.py` | AR & Sales by customer (DSO, growth rate) |
 | `audit_ar_turnover.py` | AR turnover ratio analysis |
-| `audit_analyze_AR.py` | AR aging & customer analysis |
-| `audit_sales_yoy.py` | Sales YoY comparison (2024 vs 2025) |
+| `audit_analyze_AR.py` | AR aging & customer deep-dive |
+| `audit_sales_yoy.py` | Sales YoY comparison |
 | `audit_sales_summary.py` | Monthly sales pivot (related vs general) |
 | `audit_production_yoy.py` | Production YoY (2023–2025) |
 | `audit_revenue_drop.py` | Revenue anomaly detection |
@@ -148,40 +272,81 @@
 | `audit_shipping_analysis.py` | Shipping cost analysis |
 | `audit_shipping_zone_analysis.py` | Shipping by zone |
 | `audit_gl_transport.py` | GL transport account audit |
+| `credit_note_analysis.py` | Credit note analysis |
+| `map_clearing_data.py` | Clearing document mapping |
 
-### reporting/ — Report generation
+### `06_Scripts/reporting/` — Report Generation
+
 | Script | วัตถุประสงค์ |
 |--------|------------|
 | `production_cost_report.py` | Production cost (DM, conversion, unit cost) → 4-sheet Excel |
 | `reconcile_tax.py` | AP tax reconciliation (5-step matching) → 3-sheet Excel |
-| `app_01_sales_analytics.py` | Sales analytics notebook (product mix, customer frequency) |
+| `nrv_price_methodology_2026_q1.py` | NRV price methodology Q1 2026 |
+| `nrv_rm_calc_explained_2026_q1.py` | NRV RM calculation explained Q1 2026 |
+| `nrv_rm_pipe_analysis_2026_q1.py` | NRV RM pipe analysis Q1 2026 |
+| `nrv_sku_analysis.py` | NRV SKU analysis |
+| `production_cost_nrv_reference.py` | Production cost NRV reference |
+| `production_variance_allocation_2026_q1.py` | Production variance allocation Q1 2026 |
+| `app_01_sales_analytics.py` | Sales analytics (product mix, customer frequency) |
 | `analytics.py` | Basic sales analytics pivot tables |
-| `merge sale file.py` | Utility: merge multiple sales files |
+| `merge_sales_file.py` | Utility: merge multiple sales files |
 
-### utils/ — Shared utilities
+### `06_Scripts/leadsheet/` — Quarterly Leadsheet Builder
+
+| Script | วัตถุประสงค์ |
+|--------|------------|
+| `build_q1_2026_leadsheet.py` | สร้าง Q1 2026 leadsheet + schedules |
+| `extract_tb_data.py` | Extract Trial Balance data จาก Excel |
+| `update_formulas.py` | Update Excel formulas ใน leadsheet |
+
+### `06_Scripts/utils/` — Shared Utilities
+
 | Module | วัตถุประสงค์ |
 |--------|------------|
+| `lake_client.py` | HTTP client สำหรับ consumer projects ที่เรียก API |
+| `lake_config.py` | อ่าน `08_Config/data_paths.yaml` → path objects |
 | `excel_utils.py` | Excel formatting (header, currency, auto-fit, total row) |
 | `parquet_utils.py` | Parquet I/O + DuckDB query helper |
 | `date_utils.py` | Month names (TH/EN), fiscal periods, timestamps |
 
 ---
 
-## Quick Start
+## Quick Reference
 
 ```bash
-# 1. ติดตั้ง dependencies
-pip install -r requirements.txt
-
-# 2. สร้าง DuckDB views
-python 04_Data_Pipelines/init_duckdb.py
-
-# 3. รัน full pipeline
+# Full pipeline refresh
 python run_pipeline.py --all
 
-# 4. เปิด dashboard
-python run_pipeline.py --dashboard
-
-# 5. รัน Silver ETL เฉพาะ domain
+# ETL ทีละ domain
+python run_pipeline.py --layer silver --domain gl
 python run_pipeline.py --layer silver --domain sales --year 2025
+python run_pipeline.py --layer silver --domain production --year 2025
+python run_pipeline.py --layer silver --domain ar
+
+# Gold aggregation
+python run_pipeline.py --layer gold
+
+# DuckDB views เท่านั้น
+python run_pipeline.py --init-db
+
+# Gold Parquets (รันแยก — ไม่อยู่ใน run_pipeline.py)
+python -m 04_Data_Pipelines.gold_aggregation.create_leadsheet --year 2025 --quarter Q1
+python -m 04_Data_Pipelines.gold_aggregation.create_cashflow --year 2025 --quarter Q1
+python -m 04_Data_Pipelines.gold_aggregation.create_ppe_schedule --year 2025 --quarter Q1
+python -m 04_Data_Pipelines.gold_aggregation.create_elimination --year 2025 --quarter Q1
+python -m 04_Data_Pipelines.gold_aggregation.create_related_party --year 2025 --quarter Q1
+
+# เปิด API
+uvicorn backend.main:app --reload --port 8000
 ```
+
+---
+
+## Known Issues / TODO
+
+| Issue | Priority |
+|---|---|
+| `master_ar.parquet` ยังไม่ได้รัน ETL — `v_ar` ใน DuckDB จะ skip | Medium |
+| `gold_cashflow`, `gold_ppe`, `gold_elimination`, `gold_related_party` ยังไม่มี DuckDB view | Low |
+| `cost_closing.py` อ่าน CSV จาก `sap_cost_closing_app/` โดยตรง (ยังไม่มี ETL) | Low |
+| `master_ppe.parquet` ยังไม่มี (etl_ppe.py ยังไม่ได้สร้าง) — gold_ppe ใช้ GL fallback | Medium |

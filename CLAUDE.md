@@ -1,7 +1,7 @@
 # Finance Data Lake — Claude Context
 
 > Claude Code reads this file automatically when you open this project.
-> Last updated: 2026-05
+> Last updated: 2026-05-31
 
 ---
 
@@ -57,6 +57,11 @@ python 06_Scripts/utils/lake_client.py
 
 See `/run-pipeline`, `/health-check`, `/start-api`, `/migrate-neon` for guided versions.
 
+> **Reference docs** (อ่านก่อนแตะ ETL หรือ data structure):
+> - `PIPELINE.md` — คู่มือรัน ETL ทุก step + commands + troubleshooting
+> - `data_catalog.md` — schema ทุก Parquet + DuckDB views + script directory
+> - `08_Config/data_paths.yaml` — canonical path registry + layer rules
+
 ---
 
 ## Architecture
@@ -79,11 +84,16 @@ _Finance_Data_Lake/
 │   └── master_ar.parquet
 │
 ├── 03_Gold_DataMarts/        Aggregated Parquet — NOT in git
-│   └── Summary_GL_24_25.parquet
+│   ├── Summary_GL_24_25.parquet          ← v_gl_summary (DuckDB view)
+│   ├── gold_leadsheet.parquet            ← Trial Balance → Leadsheet
+│   ├── gold_cashflow.parquet             ← Cash Flow Statement (indirect)
+│   ├── gold_ppe.parquet                  ← PPE Roll-Forward Schedule
+│   ├── gold_elimination.parquet          ← Consolidation Elimination
+│   └── gold_related_party.parquet        ← Related Party Txns & Balances
 │
 ├── 04_Data_Pipelines/        ETL scripts (Bronze → Silver → Gold → DuckDB)
 │   ├── silver_transform/     etl_gl.py, etl_sales.py, etl_ar.py, etl_production.py
-│   ├── gold_aggregation/     create_gold_summary.py + other Gold builders
+│   ├── gold_aggregation/     create_gold_summary.py + create_leadsheet/cashflow/ppe/elimination/related_party
 │   └── init_duckdb.py        Creates DuckDB views from Parquet files
 │
 ├── 05_Dashboards/            Streamlit apps
@@ -300,14 +310,16 @@ These projects connect to this API. Never remove or rename an endpoint they use.
 
 ---
 
-## Current State and Known Issues (2026-05)
+## Current State and Known Issues (2026-05-31)
 
 - **Dual router namespaces**: Legacy `/api/*` (duck_service only) and versioned `/api/v1/*` (db_service, PostgreSQL-compatible). New endpoints always go in `/api/v1/`.
-- **`v_ar` view missing from DuckDB**: `init_duckdb.py` does not include a `v_ar` view yet. `master_ar.parquet` exists but needs to be added to the view map. The v1 AR endpoints work via `v_ar` table in PostgreSQL only.
+- **`master_ar.parquet` ยังไม่ได้รัน ETL**: `v_ar` view ใน DuckDB จะถูก skip จนกว่าจะรัน `python run_pipeline.py --layer silver --domain ar`
+- **Gold Audit Parquets ไม่อยู่ใน `run_pipeline.py`**: `gold_leadsheet`, `gold_cashflow`, `gold_ppe`, `gold_elimination`, `gold_related_party` ต้องรันแยกด้วย `python -m 04_Data_Pipelines.gold_aggregation.create_*` — ดู `PIPELINE.md` Step 3b
 - **`cost_closing.py` reads sibling project files**: `../sap_cost_closing_app/data/processed/` — these endpoints return 404 if that project's pipeline hasn't run.
 - **`finance_lake.duckdb` must be rebuilt after any Parquet update**: Views are pointers. Re-run `python run_pipeline.py --init-db` after any ETL run.
 - **Windows encoding**: All scripts include `sys.stdout.reconfigure(encoding='utf-8', errors='replace')`. Do not remove these guards.
 - **`financial_tb.py` reads Excel files on local, PostgreSQL on Vercel**: The router checks `settings.use_postgres` to switch source. Excel files (TB SAP export, YE25 leadsheet) must exist locally for local dev.
+- **`master_ppe.parquet` ยังไม่มี**: `etl_ppe.py` ยังไม่ได้สร้าง — `gold_ppe.parquet` ใช้ `v_gl` fallback แทน
 
 ---
 
