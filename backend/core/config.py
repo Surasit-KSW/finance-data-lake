@@ -55,14 +55,28 @@ class Settings(BaseSettings):
     # Leave empty to allow unauthenticated access (local dev).
     LEADSHEET_API_KEY: str = ""
 
+    # ── Auth ─────────────────────────────────────────────────
+    # Set API_KEY in production to restrict backend access.
+    # Leave empty for local dev (no key required).
+    API_KEY: str = ""
+
     # ── CORS ─────────────────────────────────────────────────
+    # Local dev: allow all localhost ports
+    # Production (Railway): only allow Vercel frontend
     CORS_ORIGINS: list = [
-        "http://localhost:3000",   # main-dashboard Next.js
-        "http://localhost:3001",   # fin-dashboard Next.js
-        "http://localhost:8501",   # Streamlit
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:8501",
         "http://localhost:8502",
-        "*",                       # dev: allow all (restrict on production)
+        "https://fintech-command-center.vercel.app",
     ]
+
+    @property
+    def is_production(self) -> bool:
+        return bool(self.DATABASE_URL)
 
     class Config:
         env_file = ".env"

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from backend.services.finance_calc import get_pnl, get_pnl_yoy, get_kpi
-from backend.services.duck_service import query_df
+from backend.services.db_service import query_df
 
 router = APIRouter(prefix="/api/finance", tags=["Finance"])
 
@@ -84,10 +84,10 @@ def gl_summary(year: int = Query(...)):
                SUM(Net_Amount) AS total,
                COUNT(*) AS periods
         FROM v_gl_summary
-        WHERE Year = ?
+        WHERE CAST("Year" AS INTEGER) = ?
         GROUP BY GL_Group, "G/L Account", GL_Name
         ORDER BY GL_Group, "G/L Account"
         """,
-        [float(year)],
+        [year],
     )
     return {"status": "ok", "count": len(df), "data": df.to_dict(orient="records")}

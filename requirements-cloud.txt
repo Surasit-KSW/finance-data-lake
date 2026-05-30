@@ -1,0 +1,24 @@
+# Finance Data Lake — Cloud Dependencies (Render / Railway)
+# ใช้ไฟล์นี้สำหรับ cloud deployment — ไม่มี DuckDB / Streamlit / Telegram
+
+# Core
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+
+# Excel (ใช้ใน reports router)
+openpyxl>=3.1.0
+
+# API Framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic-settings>=2.0.0
+
+# PostgreSQL (Neon)
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# Utils
+python-dotenv>=1.0.0
+requests>=2.31.0
+PyYAML>=6.0

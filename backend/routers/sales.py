@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from backend.services.duck_service import query_df
+from backend.services.db_service import query_df
 
 router = APIRouter(prefix="/api/sales", tags=["Sales"])
 
@@ -10,13 +10,13 @@ def sales_summary(year: int):
     df = query_df(
         """
         SELECT
-            MONTH("Billing Date")          AS month,
-            "Mat Group Des."               AS product_group,
-            SUM("Net Value(THB)")          AS revenue,
-            SUM("Billed Qty")              AS qty_kg,
-            COUNT(DISTINCT "Billing No")   AS invoices
+            EXTRACT(MONTH FROM "Billing Date")::int  AS month,
+            "Mat Group Des."                         AS product_group,
+            SUM("Net Value(THB)")                    AS revenue,
+            SUM("Billed Qty")                        AS qty_kg,
+            COUNT(DISTINCT "Billing No")             AS invoices
         FROM v_sales
-        WHERE YEAR("Billing Date") = ?
+        WHERE EXTRACT(YEAR FROM "Billing Date")::int = ?
           AND "Net Value(THB)" > 0
         GROUP BY month, product_group
         ORDER BY month, revenue DESC
@@ -36,13 +36,13 @@ def top_customers(
     df = query_df(
         """
         SELECT
-            "Sold-to Name"                 AS customer,
-            SUM("Net Value(THB)")          AS revenue,
-            SUM("Billed Qty")              AS qty_kg,
-            COUNT(DISTINCT "Billing No")   AS invoices,
-            COUNT(DISTINCT MONTH("Billing Date")) AS active_months
+            "Sold-to Name"                                      AS customer,
+            SUM("Net Value(THB)")                               AS revenue,
+            SUM("Billed Qty")                                   AS qty_kg,
+            COUNT(DISTINCT "Billing No")                        AS invoices,
+            COUNT(DISTINCT EXTRACT(MONTH FROM "Billing Date"))  AS active_months
         FROM v_sales
-        WHERE YEAR("Billing Date") = ?
+        WHERE EXTRACT(YEAR FROM "Billing Date")::int = ?
           AND "Net Value(THB)" > 0
         GROUP BY customer
         ORDER BY revenue DESC
@@ -62,12 +62,12 @@ def sales_yoy(
     df = query_df(
         """
         SELECT
-            YEAR("Billing Date")           AS year,
-            "Mat Group Des."               AS product_group,
-            SUM("Net Value(THB)")          AS revenue,
-            SUM("Billed Qty")              AS qty_kg
+            EXTRACT(YEAR FROM "Billing Date")::int  AS year,
+            "Mat Group Des."                        AS product_group,
+            SUM("Net Value(THB)")                   AS revenue,
+            SUM("Billed Qty")                       AS qty_kg
         FROM v_sales
-        WHERE YEAR("Billing Date") IN (?, ?)
+        WHERE EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
           AND "Net Value(THB)" > 0
         GROUP BY year, product_group
         ORDER BY product_group, year
@@ -87,11 +87,11 @@ def sales_by_month(
     df = query_df(
         """
         SELECT
-            YEAR("Billing Date")  AS year,
-            MONTH("Billing Date") AS month,
-            SUM("Net Value(THB)") AS revenue
+            EXTRACT(YEAR  FROM "Billing Date")::int  AS year,
+            EXTRACT(MONTH FROM "Billing Date")::int  AS month,
+            SUM("Net Value(THB)")                    AS revenue
         FROM v_sales
-        WHERE YEAR("Billing Date") IN (?, ?)
+        WHERE EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
           AND "Net Value(THB)" > 0
         GROUP BY year, month
         ORDER BY year, month

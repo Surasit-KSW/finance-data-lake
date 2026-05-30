@@ -8,7 +8,7 @@ SAP sign convention:
   Finance Cost (8.*) → debit = POSITIVE
   Tax    (9.*) → debit = POSITIVE (usually near zero if not recorded in GL)
 """
-from backend.services.duck_service import query_df
+from backend.services.db_service import query_df
 
 
 def get_pnl(year: int) -> dict:
@@ -20,11 +20,11 @@ def get_pnl(year: int) -> dict:
         """
         SELECT GL_Group, "G/L Account", GL_Name, SUM(Net_Amount) AS amount
         FROM v_gl_summary
-        WHERE Year = ?
+        WHERE CAST("Year" AS INTEGER) = ?
         GROUP BY GL_Group, "G/L Account", GL_Name
         ORDER BY GL_Group, "G/L Account"
         """,
-        [float(year)],
+        [year],
     )
 
     if df.empty:

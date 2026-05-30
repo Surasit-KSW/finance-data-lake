@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from backend.services.duck_service import query_df, query_scalar
+from backend.services.db_service import query_df, query_scalar
 
 router = APIRouter(prefix="/api/ar", tags=["Accounts Receivable"])
 
