@@ -40,11 +40,11 @@ def gl_transactions(
             "Posting Date"               AS posting_date,
             "G/L Account"                AS account_code,
             "G/L Account: Long Text"     AS account_name,
-            "Net_Amount"                 AS amount,
+            net_amount                   AS amount,
             "Text"                       AS description,
             "Document Number"            AS doc_number,
             "Cost Center: Short Text"    AS cost_center,
-            "Source_File"                AS source_file,
+            source_file,
             Month, Year
         FROM v_gl
         WHERE {where}
@@ -121,7 +121,7 @@ def gl_account_balance(
             Month,
             "G/L Account"            AS account_code,
             "G/L Account: Long Text" AS account_name,
-            SUM("Net_Amount")        AS period_balance,
+            SUM(net_amount)          AS period_balance,
             COUNT(*)                 AS transaction_count
         FROM v_gl
         WHERE {where}
@@ -160,7 +160,7 @@ def list_gl_accounts(
         SELECT
             "G/L Account"            AS account_code,
             "G/L Account: Long Text" AS account_name,
-            SUM("Net_Amount")        AS total_balance,
+            SUM(net_amount)          AS total_balance,
             COUNT(*)                 AS transactions
         FROM v_gl
         WHERE {where}

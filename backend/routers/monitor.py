@@ -129,7 +129,7 @@ def _query_gl_by_account(
             SELECT
                 "G/L Account"            AS account_code,
                 "G/L Account: Long Text" AS account_name,
-                SUM("Net_Amount")        AS gl_amount
+                SUM(net_amount)          AS gl_amount
             FROM v_gl
             WHERE {where}
             GROUP BY "G/L Account", "G/L Account: Long Text"
@@ -474,12 +474,12 @@ def get_pnl(
                 SUM(CASE WHEN "G/L Account" LIKE '541%'
                          OR "G/L Account" LIKE '531%'
                          OR "G/L Account" LIKE '532%'
-                    THEN "Net_Amount" ELSE 0 END) AS rm_cost,
+                    THEN net_amount ELSE 0 END) AS rm_cost,
                 SUM(CASE WHEN "G/L Account" LIKE '5%'
                          AND "G/L Account" NOT LIKE '541%'
                          AND "G/L Account" NOT LIKE '531%'
                          AND "G/L Account" NOT LIKE '532%'
-                    THEN "Net_Amount" ELSE 0 END) AS conv_cost
+                    THEN net_amount ELSE 0 END) AS conv_cost
             FROM v_gl
             WHERE CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}

@@ -16,7 +16,7 @@ def ar_summary(year: int = Query(...)):
             CAST(Month AS INTEGER)          AS month,
             "G/L Account"                   AS gl_account,
             "G/L Account: Long Text"        AS gl_name,
-            SUM("Net_Amount")               AS net_movement,
+            SUM(net_amount)               AS net_movement,
             COUNT(*)                        AS transactions
         FROM v_gl
         WHERE CAST(Year AS INTEGER) = ?
@@ -46,7 +46,7 @@ def ar_by_account(year: int = Query(...)):
         SELECT
             "G/L Account"                   AS gl_account,
             "G/L Account: Long Text"        AS gl_name,
-            SUM("Net_Amount")               AS balance,
+            SUM(net_amount)               AS balance,
             COUNT(*)                        AS transactions
         FROM v_gl
         WHERE CAST(Year AS INTEGER) = ?

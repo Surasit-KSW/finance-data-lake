@@ -97,17 +97,17 @@ def gl_reconcile(
     df = query_df(
         """
         SELECT
-            "Year", "Month",
-            SUM("Net_Amount")        AS period_amount,
-            SUM(SUM("Net_Amount")) OVER (
-                PARTITION BY "Year" ORDER BY "Month"
+            year, month,
+            SUM(net_amount)          AS period_amount,
+            SUM(SUM(net_amount)) OVER (
+                PARTITION BY year ORDER BY month
             )                        AS cumulative_balance,
             COUNT(*)                 AS transactions
         FROM v_gl
         WHERE "G/L Account" = ?
-          AND CAST("Year" AS INTEGER) = ?
-        GROUP BY "Year", "Month"
-        ORDER BY "Year", "Month"
+          AND year = ?
+        GROUP BY year, month
+        ORDER BY year, month
         """,
         [account, year],
     )

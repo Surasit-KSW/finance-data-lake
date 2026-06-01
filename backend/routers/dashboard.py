@@ -52,7 +52,7 @@ def _gl_monthly(year: int, month: int) -> dict[str, float]:
     """Return {GL_Group: net_amount} for a single year/month from v_gl_summary."""
     df = query_df(
         """
-        SELECT GL_Group, SUM(Net_Amount) AS amount
+        SELECT GL_Group AS gl_group, SUM(Net_Amount) AS amount
         FROM v_gl_summary
         WHERE CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) = ?
         GROUP BY GL_Group
@@ -61,7 +61,7 @@ def _gl_monthly(year: int, month: int) -> dict[str, float]:
     )
     if df.empty:
         return {}
-    return df.set_index("GL_Group")["amount"].to_dict()
+    return df.set_index("gl_group")["amount"].to_dict()
 
 
 def _gl_prefix_cumulative(year: int, month: int) -> dict[str, float]:
@@ -222,7 +222,7 @@ def get_working_capital(
 
     df_t12 = query_df(
         """
-        SELECT GL_Group, SUM(Net_Amount) AS amount
+        SELECT GL_Group AS gl_group, SUM(Net_Amount) AS amount
         FROM v_gl_summary
         WHERE (CAST(Year AS INTEGER) > ? OR (CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) >= ?))
           AND (CAST(Year AS INTEGER) < ? OR (CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) <= ?))
@@ -230,7 +230,7 @@ def get_working_capital(
         """,
         [t12_start_year, t12_start_year, t12_start_month, year, year, month],
     )
-    t12: dict = df_t12.set_index("GL_Group")["amount"].to_dict() if not df_t12.empty else {}
+    t12: dict = df_t12.set_index("gl_group")["amount"].to_dict() if not df_t12.empty else {}
 
     annual_revenue = abs(t12.get("4. Revenue", 0.0))
     annual_cogs    = abs(t12.get("5. COGS", 0.0))

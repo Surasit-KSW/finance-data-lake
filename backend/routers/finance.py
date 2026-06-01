@@ -58,7 +58,7 @@ def gl_transactions(
     df = query_df(
         f"""
         SELECT "Posting Date", "G/L Account", "G/L Account: Long Text",
-               "Net_Amount", "Text", "Document Number", "Cost Center: Short Text",
+               net_amount, "Text", "Document Number", "Cost Center: Short Text",
                "Vendor Account: Name 1", Month, Year
         FROM v_gl
         WHERE {where}
@@ -80,11 +80,11 @@ def gl_summary(year: int = Query(...)):
     """GL summary by GL_Group and account — from Gold layer"""
     df = query_df(
         """
-        SELECT GL_Group, "G/L Account", GL_Name,
+        SELECT GL_Group AS gl_group, "G/L Account", GL_Name AS gl_name,
                SUM(Net_Amount) AS total,
                COUNT(*) AS periods
         FROM v_gl_summary
-        WHERE CAST("Year" AS INTEGER) = ?
+        WHERE year = ?
         GROUP BY GL_Group, "G/L Account", GL_Name
         ORDER BY GL_Group, "G/L Account"
         """,
