@@ -8,11 +8,13 @@ Consumers: fintech-command-center (Monitor module)
 Data sources:
   - v_gl         : GL line items (cost accounts 5xxx filtered by cost center)
   - v_gl_summary : Monthly GL aggregates (faster for overview)
-  - v_production : Production qty + total cost per plant/order
+  - v_production : Production qty + total cost per plant/order (MB52)
+  - v_sales      : Sales billing data per plant (VF05)
 
 Endpoints:
   GET /api/v1/monitor/cost-ledger  — GL cost breakdown per plant/quarter
   GET /api/v1/monitor/overview     — Multi-plant summary (rm, conv, volume, gp)
+  GET /api/v1/monitor/pnl          — Monthly P&L consolidated (revenue + cost)
 
 SAP sign convention (v_gl):
   Cost accounts (5xxx debit)    → Net_Amount POSITIVE
@@ -47,7 +49,12 @@ ACCOUNT_SECTION: list[tuple[str, str, str]] = [
 
 CREDIT_PREFIXES = {"531", "532"}
 
-# Cost center prefix per plant (best-effort — calibrate per actual SAP config)
+# GL accounts to exclude from cost analysis (moved from frontend)
+# 5391020: ML Variance Adjustment — internal reconciliation entry
+# 5211010: Semi-FG COGM — intra-plant transfer, double-counts cost
+GL_EXCLUSION: set[str] = {"5391020", "5211010"}
+
+# Cost center prefix per plant (calibrate against actual SAP cost center master)
 PLANT_CC_PREFIX: dict[str, str] = {
     "1300": "1300",
     "1100": "1100",
@@ -61,6 +68,10 @@ PLANT_LABELS: dict[str, str] = {
 }
 
 ALL_PLANTS = ["1300", "1100", "1200"]
+
+# Column name for production output qty in v_production (MB52 actual GR qty)
+PROD_QTY_COL = "Actual GR QTY"
+PROD_AMT_COL = "Actual GR Amount"
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -95,14 +106,17 @@ def _query_gl_by_account(
 ) -> list[dict]:
     """
     Aggregate v_gl by GL account for cost accounts (5xxx) in the given period.
+    Applies GL_EXCLUSION filter.
     Returns list of {account_code, account_name, gl_amount}.
     """
+    excl_placeholders = _in_clause(list(GL_EXCLUSION)) if GL_EXCLUSION else "('')"
     conds = [
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         '"G/L Account" LIKE \'5%\'',
+        f'"G/L Account" NOT IN {excl_placeholders}',
     ]
-    params: list = [year] + months
+    params: list = [year] + months + list(GL_EXCLUSION)
 
     if cc_prefix:
         conds.append('"Cost Center: Short Text" LIKE ?')
@@ -135,24 +149,26 @@ def _query_production_volume(
     plant: str | None = None,
 ) -> dict[str, float]:
     """
-    Return {plant: total_qty} from v_production.
-    If plant is specified, returns single-plant dict.
+    Return {plant: total_qty} from v_production using actual column names from MB52.
+    Plant in v_production is string (added by ETL from filename prefix).
     """
     conds = [
-        "CAST(\"Year\" AS INTEGER) = ?",
-        f"CAST(\"Month\" AS INTEGER) IN {_in_clause(months)}",
+        "CAST(Year AS INTEGER) = ?",
+        f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
     ]
     params: list = [year] + months
 
     if plant:
         conds.append('"Plant" = ?')
-        params.append(plant)
+        params.append(str(plant))
 
     where = " AND ".join(conds)
     try:
         df = query_df(
             f"""
-            SELECT "Plant", SUM("Production Qty") AS total_qty
+            SELECT
+                "Plant",
+                SUM("{PROD_QTY_COL}") AS total_qty
             FROM v_production
             WHERE {where}
             GROUP BY "Plant"
@@ -164,7 +180,70 @@ def _query_production_volume(
 
     if df.empty:
         return {}
-    return df.set_index("Plant")["total_qty"].to_dict()
+    return {str(k): float(v) for k, v in df.set_index("Plant")["total_qty"].to_dict().items()}
+
+
+def _query_revenue_by_plant(
+    year: int,
+    months: list[int],
+    plant: str | None = None,
+) -> dict[str, float]:
+    """
+    Return {plant: net_revenue_thb} from v_sales.
+    Plant in v_sales is integer (1100, 1200, 1300).
+    Excludes cancelled billings.
+    """
+    conds = [
+        "CAST(Year AS INTEGER) = ?",
+        f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
+        '"Net Value(THB)" > 0',
+        '(Cancelled = \'nan\' OR Cancelled IS NULL)',
+    ]
+    params: list = [year] + months
+
+    if plant:
+        conds.append("CAST(Plant AS VARCHAR) = ?")
+        params.append(str(plant))
+
+    where = " AND ".join(conds)
+    try:
+        df = query_df(
+            f"""
+            SELECT
+                CAST(Plant AS VARCHAR) AS plant_code,
+                SUM("Net Value(THB)")  AS revenue
+            FROM v_sales
+            WHERE {where}
+            GROUP BY Plant
+            """,
+            params,
+        )
+    except Exception:
+        return {}
+
+    if df.empty:
+        return {}
+    return df.set_index("plant_code")["revenue"].to_dict()
+
+
+def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
+    """
+    Check if Trial Balance data exists for this plant/period.
+    Returns True/False if tb_data view exists, None if not available.
+    """
+    try:
+        df = query_df(
+            f"""
+            SELECT COUNT(*) AS cnt FROM tb_data
+            WHERE plant = ?
+              AND CAST(year AS INTEGER) = ?
+              AND CAST(month AS INTEGER) IN {_in_clause(months)}
+            """,
+            [plant, year] + months,
+        )
+        return bool(df.iloc[0]["cnt"] > 0) if not df.empty else False
+    except Exception:
+        return None  # tb_data view not available yet
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -179,6 +258,7 @@ def get_cost_ledger(
     GL cost breakdown per plant/quarter → CostLedgerRow[] for Monitor > Cost Ledger page.
 
     Aggregates v_gl cost accounts (5xxx) filtered by cost center prefix.
+    Excludes internal accounts: 5391020 (ML Variance), 5211010 (Semi-FG COGM).
     Falls back to all-plant GL if cost center filter returns no data.
     """
     months = _quarter_months(quarter)
@@ -195,6 +275,9 @@ def get_cost_ledger(
     vol_map = _query_production_volume(year, months, plant)
     volume = float(sum(vol_map.values()))
 
+    # TB availability
+    has_tb = _check_tb_data(plant, year, months)
+
     # Build CostLedgerRow[]
     rows: list[dict] = []
     for i, r in enumerate(records, 1):
@@ -203,10 +286,12 @@ def get_cost_ledger(
         gl_amt    = float(r.get("gl_amount") or 0)
 
         section, default_label, is_credit = _section_for_account(acct)
-        # SAP sign: credits stored negative → flip isCredit if negative amount
         if gl_amt < 0:
             is_credit = True
         display_amt = abs(gl_amt)
+
+        # TB flag: NO_TB if tb_data not available, OK otherwise
+        tb_flag = "NO_TB" if has_tb is None else ("OK" if has_tb else "PENDING")
 
         rows.append({
             "id":           acct,
@@ -227,7 +312,7 @@ def get_cost_ledger(
             "mb51Flag":     "MANUAL",
             "glAmount":     display_amt,
             "tbAmount":     None,
-            "tbFlag":       "OK",
+            "tbFlag":       tb_flag,
         })
 
     return {
@@ -237,6 +322,7 @@ def get_cost_ledger(
         "year":        year,
         "quarter":     quarter,
         "ccFiltered":  cc_filtered,
+        "excludedAccounts": sorted(GL_EXCLUSION),
         "count":       len(rows),
         "data":        rows,
         "meta": {
@@ -254,14 +340,14 @@ def get_overview(
     """
     Multi-plant cost summary for Monitor > Cost Overview page.
     Returns PlantCostCard data: rm_cost, conv_cost, volume, gp_margin per plant.
+    Includes simple alert detection for zero-production periods.
     """
     months = _quarter_months(quarter)
+    vol_map      = _query_production_volume(year, months)
+    revenue_map  = _query_revenue_by_plant(year, months)
 
-    # Production volume + standard cost per plant
-    vol_map = _query_production_volume(year, months)
-
-    # GL cost per plant via cost center filter
     plant_summaries: list[dict] = []
+    alerts: list[dict] = []
 
     for plant_code in ALL_PLANTS:
         cc_prefix = PLANT_CC_PREFIX.get(plant_code)
@@ -281,8 +367,27 @@ def get_overview(
             else:
                 conv_total += net_amt
 
-        volume    = float(vol_map.get(plant_code, 0))
+        volume     = float(vol_map.get(plant_code, 0))
         total_cost = rm_total + conv_total
+        revenue    = float(revenue_map.get(plant_code, 0))
+
+        # GP Margin (requires both revenue and cost data)
+        gp_margin = None
+        if revenue > 0 and total_cost > 0:
+            gp_margin = round(((revenue - total_cost) / revenue) * 100, 2)
+
+        # TB check
+        has_tb = _check_tb_data(plant_code, year, months)
+
+        # SAP score: rough estimate based on data availability
+        sap_score = None
+        if records:
+            has_key_accounts = any(
+                str(r.get("account_code", "")).startswith(p)
+                for r in records
+                for p in ("541", "551", "571")
+            )
+            sap_score = 100 if has_key_accounts else 50
 
         plant_summaries.append({
             "plantName": f"Plant {plant_code}",
@@ -292,16 +397,162 @@ def get_overview(
             "convCost":  round(conv_total, 2),
             "total":     round(total_cost, 2),
             "volume":    round(volume, 3),
-            "gpMargin":  None,    # requires revenue data — extend later
+            "revenue":   round(revenue, 2),
+            "gpMargin":  gp_margin,
             "hasGL":     bool(records),
-            "hasTB":     None,    # TB reconcile not yet wired
-            "sapScore":  None,
+            "hasTB":     has_tb,
+            "sapScore":  sap_score,
         })
+
+        # Simple alert: has GL cost but no production volume
+        if total_cost > 0 and volume == 0:
+            alerts.append({
+                "plant":  plant_code,
+                "flag":   "SAP_PENDING",
+                "detail": f"Plant {plant_code}: มี GL cost ฿{total_cost/1e6:.1f}M แต่ไม่พบ production qty ใน v_production",
+            })
+
+        # Alert: GP margin suspiciously low or negative
+        if gp_margin is not None and gp_margin < 0:
+            alerts.append({
+                "plant":  plant_code,
+                "flag":   "DIFF",
+                "detail": f"Plant {plant_code}: GP Margin ติดลบ ({gp_margin:.1f}%) — ตรวจสอบ cost allocation",
+            })
 
     return {
         "status":  "ok",
         "year":    year,
         "quarter": quarter,
         "plants":  plant_summaries,
-        "alerts":  [],   # alert feed from SAP_PENDING/DIFF — extend later
+        "alerts":  alerts,
+    }
+
+
+@router.get("/pnl")
+def get_pnl(
+    year:    int = Query(2026),
+    quarter: int = Query(1, ge=1, le=4),
+):
+    """
+    Monthly P&L breakdown per quarter — Revenue + Cost → GP per month/plant.
+    Uses v_sales (Net Value THB) for revenue, v_gl (5xxx) for production cost.
+    """
+    months = _quarter_months(quarter)
+    month_labels = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+                    5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+                    9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+
+    # ── Monthly Revenue from v_sales ────────────────────────────────────────
+    try:
+        rev_df = query_df(
+            f"""
+            SELECT
+                CAST(Month AS INTEGER)   AS month,
+                CAST(Plant AS VARCHAR)   AS plant_code,
+                SUM("Net Value(THB)")    AS revenue
+            FROM v_sales
+            WHERE CAST(Year AS INTEGER) = ?
+              AND CAST(Month AS INTEGER) IN {_in_clause(months)}
+              AND "Net Value(THB)" > 0
+              AND (Cancelled = 'nan' OR Cancelled IS NULL)
+            GROUP BY Month, Plant
+            ORDER BY Month, Plant
+            """,
+            [year] + months,
+        )
+    except Exception:
+        rev_df = None
+
+    # ── Monthly Cost from v_gl (5xxx, exclude internal accounts) ───────────
+    excl_ph = _in_clause(list(GL_EXCLUSION))
+    try:
+        cost_df = query_df(
+            f"""
+            SELECT
+                CAST(Month AS INTEGER)   AS month,
+                SUM(CASE WHEN "G/L Account" LIKE '541%'
+                         OR "G/L Account" LIKE '531%'
+                         OR "G/L Account" LIKE '532%'
+                    THEN "Net_Amount" ELSE 0 END) AS rm_cost,
+                SUM(CASE WHEN "G/L Account" LIKE '5%'
+                         AND "G/L Account" NOT LIKE '541%'
+                         AND "G/L Account" NOT LIKE '531%'
+                         AND "G/L Account" NOT LIKE '532%'
+                    THEN "Net_Amount" ELSE 0 END) AS conv_cost
+            FROM v_gl
+            WHERE CAST(Year AS INTEGER) = ?
+              AND CAST(Month AS INTEGER) IN {_in_clause(months)}
+              AND "G/L Account" LIKE '5%'
+              AND "G/L Account" NOT IN {excl_ph}
+            GROUP BY Month
+            ORDER BY Month
+            """,
+            [year] + months + list(GL_EXCLUSION),
+        )
+    except Exception:
+        cost_df = None
+
+    # ── Build monthly P&L rows ───────────────────────────────────────────────
+    monthly_pnl = []
+    for mo in months:
+        label = month_labels.get(mo, str(mo))
+
+        # Revenue: sum across all plants for this month
+        revenue = 0.0
+        if rev_df is not None and not rev_df.empty:
+            mo_rev = rev_df[rev_df["month"] == mo]
+            revenue = float(mo_rev["revenue"].sum()) if not mo_rev.empty else 0.0
+
+        # Costs
+        rm_cost = conv_cost = 0.0
+        if cost_df is not None and not cost_df.empty:
+            mo_cost = cost_df[cost_df["month"] == mo]
+            if not mo_cost.empty:
+                rm_cost   = float(mo_cost.iloc[0]["rm_cost"])
+                conv_cost = float(mo_cost.iloc[0]["conv_cost"])
+
+        # Credits are stored negative → negate rm_cost if negative
+        if rm_cost < 0:
+            rm_cost = abs(rm_cost)
+
+        gp = revenue - rm_cost - conv_cost
+
+        monthly_pnl.append({
+            "label":    label,
+            "month":    mo,
+            "revenue":  round(revenue, 2),
+            "rmCost":   round(rm_cost, 2),
+            "convCost": round(conv_cost, 2),
+            "gp":       round(gp, 2),
+        })
+
+    # ── Per-plant product summary ────────────────────────────────────────────
+    products = []
+    rev_by_plant = _query_revenue_by_plant(year, months)
+    vol_by_plant = _query_production_volume(year, months)
+
+    for plant_code in ALL_PLANTS:
+        plant_rev   = float(rev_by_plant.get(plant_code, 0))
+        plant_vol   = float(vol_by_plant.get(plant_code, 0))
+        plant_label = PLANT_LABELS.get(plant_code, plant_code)
+
+        products.append({
+            "product":     plant_label,
+            "plant":       plant_code,
+            "volSold":     round(plant_vol, 1),
+            "volProduced": round(plant_vol, 1),
+            "revenue":     round(plant_rev, 2),
+            "margin":      None,  # requires unit cost — extend with cost-ledger join
+        })
+
+    has_data = any(row["revenue"] > 0 or row["rmCost"] > 0 for row in monthly_pnl)
+
+    return {
+        "status":      "ok",
+        "year":        year,
+        "quarter":     quarter,
+        "usingMock":   not has_data,
+        "monthlyPnl":  monthly_pnl,
+        "products":    products,
     }

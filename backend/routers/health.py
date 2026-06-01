@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from backend.core.config import settings
 
@@ -45,3 +47,50 @@ def health_check():
 def health_v1():
     """Health check — returns API version, DB backend, available views."""
     return _health_data()
+
+
+@router.get("/api/v1/pipeline/freshness", tags=["Health v1"])
+def pipeline_freshness():
+    """
+    Latest data period ต่อ domain — ใช้ใน Dashboard แสดงว่าข้อมูลสดแค่ไหน
+    Response: { gl: "2026-05", ar: "2026-04", sales: "2026-05", production: "2026-05" }
+    """
+    from backend.services.db_service import query_df
+
+    def latest_period(view: str) -> str | None:
+        try:
+            df = query_df(
+                f"""
+                SELECT
+                    MAX(CAST(Year AS INTEGER))  AS max_year,
+                    MAX(CAST(Month AS INTEGER)) AS max_month
+                FROM (
+                    SELECT Year, Month FROM {view}
+                    WHERE CAST(Year AS INTEGER) = (
+                        SELECT MAX(CAST(Year AS INTEGER)) FROM {view}
+                    )
+                ) t
+                """,
+                [],
+            )
+            if df.empty or df["max_year"].iloc[0] is None:
+                return None
+            yr = int(df["max_year"].iloc[0])
+            mo = int(df["max_month"].iloc[0])
+            return f"{yr}-{mo:02d}"
+        except Exception:
+            return None
+
+    domains = {
+        "gl":         latest_period("v_gl"),
+        "gl_summary": latest_period("v_gl_summary"),
+        "sales":      latest_period("v_sales"),
+        "production": latest_period("v_production"),
+        "ar":         latest_period("v_ar"),
+    }
+
+    return {
+        "status":   "ok",
+        "freshness": domains,
+        "as_of":    datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }

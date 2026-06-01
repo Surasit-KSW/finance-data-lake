@@ -2,18 +2,20 @@
 etl_gl.py — Bronze → Silver: GL Transactions ETL
 รัน: python 04_Data_Pipelines/silver_transform/etl_gl.py
 
-รวมไฟล์ GL (sap_fbl3n.XLSX) จาก Bronze layer → Master_GL_24_25.parquet ใน Silver layer
+รวมไฟล์ GL (sap_fbl3n.XLSX) จาก Bronze layer → Master_GL_24_26.parquet ใน Silver layer
+ชื่อ output file เป็น dynamic ตามช่วงปีจริงในข้อมูล เช่น Master_GL_24_26.parquet
 """
 
-import pandas as pd
+import glob
 import os
+
+import pandas as pd
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 BRONZE_GL = os.path.join(PROJECT_ROOT, "01_Bronze_Raw", "GL_Transactions")
 SILVER = os.path.join(PROJECT_ROOT, "02_Silver_Cleaned")
-TARGET_FILE = os.path.join(SILVER, "Master_GL_24_25.parquet")
 
 print(f"\n{'='*50}")
 print(f"🚀 ETL: GL Transactions → Silver Layer")
@@ -54,7 +56,32 @@ for col in master_df.columns:
         master_df[col] = master_df[col].astype(str)
 
 os.makedirs(SILVER, exist_ok=True)
+
+# ตั้งชื่อ output ตามช่วงปีจริงในข้อมูล
+year_col = next((c for c in master_df.columns if c.strip().upper() in ("YEAR", "FISCAL YEAR", "GJAHR")), None)
+if year_col:
+    years = sorted(master_df[year_col].dropna().astype(str).str[:4].unique())
+    years = [y for y in years if y.isdigit() and 2000 < int(y) < 2100]
+else:
+    years = []
+
+if len(years) >= 2:
+    year_suffix = f"{years[0][-2:]}_{years[-1][-2:]}"
+elif len(years) == 1:
+    y = years[0][-2:]
+    year_suffix = f"{y}_{y}"
+else:
+    year_suffix = "all"
+
+TARGET_FILE = os.path.join(SILVER, f"Master_GL_{year_suffix}.parquet")
+
+# ลบไฟล์เก่าที่ชื่อต่างออกไป
+for old in glob.glob(os.path.join(SILVER, "Master_GL_*.parquet")):
+    if old != TARGET_FILE:
+        os.remove(old)
+        print(f"🗑️  ลบไฟล์เก่า: {os.path.basename(old)}")
+
 master_df.to_parquet(TARGET_FILE, engine="pyarrow", index=False)
-print(f"\n💾 บันทึกสำเร็จ: {TARGET_FILE}")
+print(f"\n💾 บันทึกสำเร็จ: {os.path.basename(TARGET_FILE)}  (ปี: {years})")
 print(f"   📊 {len(master_df):,} rows, {len(master_df.columns)} columns")
 print(f"\n✨ etl_gl เสร็จสิ้น")

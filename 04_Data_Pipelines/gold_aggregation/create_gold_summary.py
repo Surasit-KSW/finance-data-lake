@@ -1,23 +1,43 @@
-import pandas as pd
+import glob
 import os
+
+import pandas as pd
 
 print("⏳ กำลังสร้างไฟล์ข้อมูลระดับ Gold (Summary) แบบมีชื่อบัญชี...")
 
 script_dir = os.path.dirname(os.path.abspath(__file__))   # gold_aggregation/
 project_root = os.path.dirname(os.path.dirname(script_dir))  # → project root
 
-input_file = os.path.join(project_root, '02_Silver_Cleaned', 'Master_GL_24_25.parquet')
-if not os.path.exists(input_file):
-    print(f"❌ ไม่พบไฟล์ Silver GL: {input_file}")
+# หาไฟล์ Silver GL อัตโนมัติ — รองรับทุกชื่อ เช่น Master_GL_24_25.parquet, Master_GL_24_26.parquet
+silver_dir = os.path.join(project_root, '02_Silver_Cleaned')
+gl_candidates = sorted(glob.glob(os.path.join(silver_dir, 'Master_GL_*.parquet')))
+if not gl_candidates:
+    print(f"❌ ไม่พบไฟล์ Silver GL (Master_GL_*.parquet) ใน: {silver_dir}")
     raise SystemExit(1)
 
+# ใช้ไฟล์ล่าสุด (sort alphabetically → ปีใหม่กว่ามาหลัง)
+input_file = gl_candidates[-1]
+print(f"📂 ใช้ไฟล์ Silver GL: {os.path.basename(input_file)}")
+
+# ตั้งชื่อ output ตามปีที่มีข้อมูลจริง (อ่านจากข้อมูล)
 output_dir = os.path.join(project_root, '03_Gold_DataMarts')
 os.makedirs(output_dir, exist_ok=True)
-output_file = os.path.join(output_dir, 'Summary_GL_24_25.parquet')
 
 print(f"📂 กำลังอ่านไฟล์จาก: {input_file}")
 # 🌟 [เพิ่มใหม่] สั่งดึงคอลัมน์ชื่อบัญชี 'G/L Account: Long Text' มาด้วย
 df = pd.read_parquet(input_file, columns=['Year', 'Month', 'G/L Account', 'G/L Account: Long Text', 'Net_Amount'])
+
+# ตั้งชื่อ output ตามช่วงปีจริงในข้อมูล เช่น Summary_GL_24_26.parquet
+years = sorted(df['Year'].dropna().astype(int).unique())
+if len(years) >= 2:
+    year_suffix = f"{str(years[0])[-2:]}_{str(years[-1])[-2:]}"
+elif len(years) == 1:
+    y = str(years[0])[-2:]
+    year_suffix = f"{y}_{y}"
+else:
+    year_suffix = "all"
+output_file = os.path.join(output_dir, f'Summary_GL_{year_suffix}.parquet')
+print(f"💾 Output: {os.path.basename(output_file)}  (ปีในข้อมูล: {years})")
 
 def get_gl_group(gl):
     gl_str = str(gl)
@@ -47,4 +67,11 @@ summary_df['GL_Name'] = summary_df['GL_Name'].fillna('Unknown')
 
 print(f"💾 กำลังบันทึกไฟล์ Gold Data ไปที่: {output_file}")
 summary_df.to_parquet(output_file, engine='pyarrow', index=False)
+
+# ลบ Gold files เก่าที่ชื่อต่างออกไป (เช่น Summary_GL_24_25.parquet เมื่อมี _24_26 แล้ว)
+for old_file in glob.glob(os.path.join(output_dir, 'Summary_GL_*.parquet')):
+    if old_file != output_file:
+        os.remove(old_file)
+        print(f"🗑️  ลบไฟล์เก่า: {os.path.basename(old_file)}")
+
 print("✅ สำเร็จ! ไฟล์ Summary อัปเดตชื่อบัญชีเรียบร้อยแล้ว")

@@ -109,14 +109,21 @@ def _pnl_for_period(year: int, month: int) -> dict | None:
 
     safe_rev = revenue if revenue != 0 else 1
     return {
-        "revenue":           revenue,
-        "cogs":              cogs,
-        "gross_profit":      gross_profit,
-        "operating_expense": opex,
-        "ebitda":            ebitda,
-        "net_profit":        net_profit,
-        "gross_margin_pct":  round(gross_profit / safe_rev * 100, 2),
-        "net_margin_pct":    round(net_profit   / safe_rev * 100, 2),
+        "revenue":            revenue,
+        "cogs":               cogs,
+        "gross_profit":       gross_profit,
+        "selling_expense":    selling,
+        "admin_expense":      admin,
+        "operating_expense":  opex,
+        "ebit":               ebit,
+        "finance_cost":       finance_cost,
+        "ebt":                ebt,
+        "tax":                tax,
+        "net_profit":         net_profit,
+        "ebitda":             ebitda,   # currently EBITDA ≈ EBIT (D&A not separately tagged)
+        "gross_margin_pct":   round(gross_profit / safe_rev * 100, 2),
+        "ebit_margin_pct":    round(ebit          / safe_rev * 100, 2),
+        "net_margin_pct":     round(net_profit    / safe_rev * 100, 2),
     }
 
 
@@ -177,7 +184,10 @@ def get_liquidity(
         "current_assets":       current_assets,
         "current_liabilities":  current_liabilities,
         "cash_and_equivalents": round(cash, 2),
+        "accounts_receivable":  round(ar, 2),
         "inventory":            round(inv, 2),
+        "equity":               round(equity, 2),
+        "net_assets":           round(equity, 2),   # proxy: equity ≈ net assets from GL 33*
         "current_ratio":        round(current_assets / safe_cl, 2),
         "quick_ratio":          round((current_assets - inv) / safe_cl, 2),
         "cash_ratio":           round(cash / safe_cl, 2),

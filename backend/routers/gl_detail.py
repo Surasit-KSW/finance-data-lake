@@ -44,6 +44,7 @@ def gl_transactions(
             "Text"                       AS description,
             "Document Number"            AS doc_number,
             "Cost Center: Short Text"    AS cost_center,
+            "Source_File"                AS source_file,
             Month, Year
         FROM v_gl
         WHERE {where}
@@ -57,6 +58,42 @@ def gl_transactions(
         "year":    year,
         "count":   len(df),
         "data":    df.to_dict(orient="records"),
+    }
+
+
+@router.get("/accounts-by-group")
+def gl_accounts_by_group(
+    year:     int = Query(..., description="ปี เช่น 2026"),
+    month:    int = Query(..., description="เดือน 1-12"),
+    gl_group: str = Query(..., description="เช่น '4. Revenue', '5. COGS'"),
+):
+    """
+    GL accounts ที่ประกอบกันเป็น GL Group สำหรับ period ที่ระบุ
+    ใช้สำหรับ Lineage Drawer — Level 1: แสดง account breakdown ของ KPI
+    """
+    df = query_df(
+        """
+        SELECT
+            "G/L Account"  AS account_code,
+            GL_Name        AS account_name,
+            SUM(Net_Amount) AS period_amount,
+            COUNT(*)        AS transaction_count
+        FROM v_gl_summary
+        WHERE CAST(Year AS INTEGER) = ?
+          AND CAST(Month AS INTEGER) = ?
+          AND GL_Group = ?
+        GROUP BY "G/L Account", GL_Name
+        ORDER BY ABS(SUM(Net_Amount)) DESC
+        """,
+        [year, month, gl_group],
+    )
+    return {
+        "status":   "ok",
+        "year":     year,
+        "month":    month,
+        "gl_group": gl_group,
+        "count":    len(df),
+        "data":     df.to_dict(orient="records"),
     }
 
 

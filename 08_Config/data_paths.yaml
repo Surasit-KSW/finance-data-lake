@@ -52,9 +52,10 @@ bronze:
 # ---------------------------------------------------------------------------
 silver:
   root:       "02_Silver_Cleaned"
-  sales:      "02_Silver_Cleaned/master_sales_{year}.parquet"   # {year} = 2023/2024/2025
+  sales:      "02_Silver_Cleaned/master_sales_{year}.parquet"   # {year} = 2023/2024/2025/2026
   production: "02_Silver_Cleaned/master_production_{year}.parquet"
-  gl:         "02_Silver_Cleaned/Master_GL_24_25.parquet"
+  # GL: ชื่อไฟล์ตามช่วงปี เช่น Master_GL_24_26.parquet — ใช้ wildcard Master_GL_*.parquet
+  gl:         "02_Silver_Cleaned/Master_GL_*.parquet"
   ar:         "02_Silver_Cleaned/master_ar.parquet"
 
 # ---------------------------------------------------------------------------
@@ -62,7 +63,8 @@ silver:
 # ---------------------------------------------------------------------------
 gold:
   root:       "03_Gold_DataMarts"
-  gl_summary: "03_Gold_DataMarts/Summary_GL_24_25.parquet"
+  # GL summary: ชื่อตามช่วงปีจริง เช่น Summary_GL_24_26.parquet — ใช้ wildcard
+  gl_summary: "03_Gold_DataMarts/Summary_GL_*.parquet"
 
 # ---------------------------------------------------------------------------
 # Scripts & Outputs
