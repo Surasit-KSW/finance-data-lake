@@ -62,8 +62,13 @@ def _get_pg_conn():
 
 
 def _normalize_sql(sql: str) -> str:
-    """Convert DuckDB-style ? params to PostgreSQL %s params."""
-    return sql.replace("?", "%s")
+    """Convert DuckDB-style ? params to PostgreSQL %s params.
+    Also escapes literal % signs (e.g. LIKE '5%') as %% so psycopg2
+    doesn't interpret them as format specifiers.
+    """
+    sql = sql.replace("%", "%%")   # escape LIKE wildcards first
+    sql = sql.replace("?", "%s")   # then convert param placeholders
+    return sql
 
 
 def _pg_query_df(sql: str, params: list | None = None) -> pd.DataFrame:
