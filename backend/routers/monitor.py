@@ -54,11 +54,14 @@ CREDIT_PREFIXES = {"531", "532"}
 # 5211010: Semi-FG COGM — intra-plant transfer, double-counts cost
 GL_EXCLUSION: set[str] = {"5391020", "5211010"}
 
-# Cost center prefix per plant (calibrate against actual SAP cost center master)
+# Cost center prefix per plant — SAP cost centers are 7-digit codes
+# Plant 1300 (GI)  → cost centers start with 13 (e.g. 1387120, 1381000)
+# Plant 1100 (A1)  → cost centers start with 11 (e.g. 1187201, 1181000)
+# Plant 1200 (A2)  → cost centers start with 12 (e.g. 1287300, 1281000)
 PLANT_CC_PREFIX: dict[str, str] = {
-    "1300": "1300",
-    "1100": "1100",
-    "1200": "1200",
+    "1300": "13",
+    "1100": "11",
+    "1200": "12",
 }
 
 PLANT_LABELS: dict[str, str] = {
@@ -119,7 +122,7 @@ def _query_gl_by_account(
     params: list = [year] + months + list(GL_EXCLUSION)
 
     if cc_prefix:
-        conds.append('"Cost Center: Short Text" LIKE ?')
+        conds.append('"Cost Center" LIKE ?')
         params.append(f"{cc_prefix}%")
 
     where = " AND ".join(conds)
