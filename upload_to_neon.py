@@ -67,7 +67,8 @@ def insert_batch(conn, table: str, columns: list[str], rows: list[tuple]):
 # ─── Schema ───────────────────────────────────────────────────────────────────
 
 DDL_V_GL = """
-CREATE TABLE IF NOT EXISTS v_gl (
+DROP TABLE IF EXISTS v_gl;
+CREATE TABLE v_gl (
     "G/L Account"              TEXT,
     "G/L Account: Long Text"   TEXT,
     net_amount                 DOUBLE PRECISION,
@@ -88,11 +89,12 @@ CREATE TABLE IF NOT EXISTS v_gl (
 """
 # Column naming rules:
 #   - lowercase (unquoted) for valid identifiers: year, month, net_amount, source_file
-#     → SQL can use Year/year/Net_Amount/net_amount — Postgres normalizes to lowercase → matches
+#     → SQL can use any case — Postgres normalizes unquoted to lowercase → matches
 #   - quoted for special-char columns: "G/L Account", "Posting Date", etc.
 
 DDL_V_GL_SUMMARY = """
-CREATE TABLE IF NOT EXISTS v_gl_summary (
+DROP TABLE IF EXISTS v_gl_summary;
+CREATE TABLE v_gl_summary (
     year         INTEGER,
     month        INTEGER,
     gl_group     TEXT,
@@ -168,15 +170,14 @@ def upload_gl():
         ))
 
     cols = [
-        "G/L Account", "G/L Account: Long Text", "Net_Amount",
-        "Year", "Month", "Posting Date", "Document Number", "Text",
+        "G/L Account", "G/L Account: Long Text", "net_amount",
+        "year", "month", "Posting Date", "Document Number", "Text",
         "Cost Center", "Cost Center: Long Text", "Cost Center: Short Text",
-        "Source_File", "Company Code", "Document type", "Reference", "Assignment",
+        "source_file", "Company Code", "Document type", "Reference", "Assignment",
     ]
 
-    print("   🏗️  สร้าง table v_gl (if not exists)...")
+    print("   🏗️  สร้าง/recreate table v_gl...")
     execute_ddl(DDL_V_GL)
-    truncate_table("v_gl")
 
     print(f"   ⬆️  Uploading {len(records):,} rows in batches of {BATCH_SIZE}...")
     conn = get_conn()
@@ -237,11 +238,10 @@ def upload_gl_summary():
         for _, row in df.iterrows()
     ]
 
-    cols = ["Year", "Month", "GL_Group", "G/L Account", "Net_Amount", "GL_Name"]
+    cols = ["year", "month", "gl_group", "G/L Account", "net_amount", "gl_name"]
 
-    print("   🏗️  สร้าง table v_gl_summary (if not exists)...")
+    print("   🏗️  สร้าง/recreate table v_gl_summary...")
     execute_ddl(DDL_V_GL_SUMMARY)
-    truncate_table("v_gl_summary")
 
     print(f"   ⬆️  Uploading {len(records):,} rows...")
     conn = get_conn()
