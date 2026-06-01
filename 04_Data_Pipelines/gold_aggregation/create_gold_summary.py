@@ -24,8 +24,27 @@ output_dir = os.path.join(project_root, '03_Gold_DataMarts')
 os.makedirs(output_dir, exist_ok=True)
 
 print(f"📂 กำลังอ่านไฟล์จาก: {input_file}")
-# 🌟 [เพิ่มใหม่] สั่งดึงคอลัมน์ชื่อบัญชี 'G/L Account: Long Text' มาด้วย
-df = pd.read_parquet(input_file, columns=['Year', 'Month', 'G/L Account', 'G/L Account: Long Text', 'Net_Amount'])
+df_full = pd.read_parquet(input_file)
+available = set(df_full.columns)
+
+# Required columns — bail if any are missing
+required = {'Year', 'Month', 'G/L Account', 'Net_Amount'}
+missing = required - available
+if missing:
+    print(f"❌ Silver GL file ขาด columns: {sorted(missing)}")
+    print("   กรุณา re-export FBL3N จาก SAP ให้รวม G/L Account + Amount in LC + Fiscal Year")
+    raise SystemExit(1)
+
+# Optional: account long text
+use_cols = ['Year', 'Month', 'G/L Account', 'Net_Amount']
+has_long_text = 'G/L Account: Long Text' in available
+if has_long_text:
+    use_cols.append('G/L Account: Long Text')
+
+df = df_full[use_cols].copy()
+if not has_long_text:
+    df['G/L Account: Long Text'] = None
+    print("   ℹ️  'G/L Account: Long Text' not found — GL_Name will be empty")
 
 # ตั้งชื่อ output ตามช่วงปีจริงในข้อมูล เช่น Summary_GL_24_26.parquet
 years = sorted(df['Year'].dropna().astype(int).unique())
