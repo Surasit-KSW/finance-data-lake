@@ -5,10 +5,18 @@ All paths resolve relative to project root (parent of backend/)
 Cloud-ready: set DATABASE_URL env var to switch from DuckDB to PostgreSQL.
 """
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # ── Paths ────────────────────────────────────────────────
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
@@ -50,6 +58,10 @@ class Settings(BaseSettings):
     # Set DATABASE_URL="postgresql://user:pass@host:5432/db" for cloud.
     DATABASE_URL: str = ""
 
+    # Set FORCE_DUCKDB=true to use local DuckDB even if DATABASE_URL is set.
+    # Useful for local dev when DATABASE_URL is set in system environment.
+    FORCE_DUCKDB: bool = False
+
     # ── API Keys ─────────────────────────────────────────────
     # Set LEADSHEET_API_KEY in .env to protect /leadsheet/build.
     # Leave empty to allow unauthenticated access (local dev).
@@ -78,13 +90,10 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return bool(self.DATABASE_URL)
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"   # ignore unknown env vars (e.g. ANTHROPIC_API_KEY)
-
     @property
     def use_postgres(self) -> bool:
+        if self.FORCE_DUCKDB:
+            return False
         return bool(self.DATABASE_URL)
 
 
