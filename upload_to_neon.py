@@ -104,6 +104,20 @@ CREATE TABLE v_gl_summary (
 );
 """
 
+DDL_V_PRODUCTION = """
+DROP TABLE IF EXISTS v_production;
+CREATE TABLE v_production (
+    "Material"         TEXT,
+    "Description (EN)" TEXT,
+    "Plant"            TEXT,
+    "Year"             INTEGER,
+    "Month"            INTEGER,
+    "Actual GR QTY"    DOUBLE PRECISION,
+    "Actual GR Amount" DOUBLE PRECISION,
+    "Source_File"      TEXT
+);
+"""
+
 
 # ─── Upload: v_gl ─────────────────────────────────────────────────────────────
 
@@ -253,11 +267,92 @@ def upload_gl_summary():
     print(f"   ✅ v_gl_summary uploaded: {len(records):,} rows")
 
 
+# ─── Upload: v_production ────────────────────────────────────────────────────
+
+def upload_production():
+    """Upload Silver production parquet files → v_production table in Neon.
+
+    Reads all master_production_*.parquet files and uploads the slim set of
+    columns needed for Cost Ledger unit-cost queries:
+      Material, Description (EN), Plant, Year, Month,
+      Actual GR QTY, Actual GR Amount, Source_File
+    """
+    files = sorted(glob.glob(os.path.join(SILVER, "master_production_*.parquet")))
+    if not files:
+        print("❌ ไม่พบ master_production_*.parquet ใน Silver layer")
+        return
+
+    SLIM_COLS = [
+        "Material", "Description (EN)", "Plant", "Year", "Month",
+        "Actual GR QTY", "Actual GR Amount", "Source_File",
+    ]
+
+    all_dfs = []
+    for f in files:
+        print(f"\n📂 อ่าน: {os.path.basename(f)}")
+        df = pd.read_parquet(f, columns=[c for c in SLIM_COLS if c in pd.read_parquet(f, columns=None).columns])
+        all_dfs.append(df)
+        print(f"   📊 {len(df):,} rows")
+
+    combined = pd.concat(all_dfs, ignore_index=True)
+    print(f"\n   📊 รวม {len(combined):,} rows จาก {len(files)} ไฟล์")
+
+    def clean_str(s):
+        if pd.isna(s): return None
+        s = str(s)
+        return None if s in ("nan", "None", "") else s
+
+    def clean_int(v):
+        if pd.isna(v): return None
+        try: return int(float(v))
+        except Exception: return None
+
+    def clean_float(v):
+        if pd.isna(v): return None
+        try: return float(v)
+        except Exception: return None
+
+    records = [
+        (
+            clean_str(row.get("Material")),
+            clean_str(row.get("Description (EN)")),
+            clean_str(row.get("Plant")),
+            clean_int(row.get("Year")),
+            clean_int(row.get("Month")),
+            clean_float(row.get("Actual GR QTY")),
+            clean_float(row.get("Actual GR Amount")),
+            clean_str(row.get("Source_File")),
+        )
+        for _, row in combined.iterrows()
+    ]
+
+    cols = [
+        "Material", "Description (EN)", "Plant", "Year", "Month",
+        "Actual GR QTY", "Actual GR Amount", "Source_File",
+    ]
+
+    print("   🏗️  สร้าง/recreate table v_production...")
+    execute_ddl(DDL_V_PRODUCTION)
+
+    print(f"   ⬆️  Uploading {len(records):,} rows in batches of {BATCH_SIZE}...")
+    conn = get_conn()
+    try:
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i+BATCH_SIZE]
+            insert_batch(conn, "v_production", cols, batch)
+            pct = min(100, int((i + len(batch)) / len(records) * 100))
+            print(f"      {pct:3d}% ({i + len(batch):,}/{len(records):,})", end="\r")
+    finally:
+        conn.close()
+
+    print(f"\n   ✅ v_production uploaded: {len(records):,} rows")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Upload parquet → Neon PostgreSQL")
-    parser.add_argument("--domain", choices=["gl", "gl_summary", "all"], default="all")
+    parser.add_argument("--domain", choices=["gl", "gl_summary", "production", "all"], default="all")
     args = parser.parse_args()
 
     print("=" * 55)
@@ -270,6 +365,9 @@ def main():
 
     if args.domain in ("gl_summary", "all"):
         upload_gl_summary()
+
+    if args.domain in ("production", "all"):
+        upload_production()
 
     print("\n✅ เสร็จสิ้น — ข้อมูลพร้อมใช้งานบน Render/Vercel")
 
