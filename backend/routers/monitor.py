@@ -236,24 +236,55 @@ def _query_revenue_by_plant(
     return df.set_index("plant_code")["revenue"].to_dict()
 
 
-def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
+def _query_tb_amounts(
+    year: int,
+    months: list[int],
+    cc_prefix: str | None,
+) -> dict[str, float] | None:
     """
-    Check if Trial Balance data exists for this plant/period.
-    Returns True/False if tb_data view exists, None if not available.
+    Return {account: raw_amount} from v_gl — same CC filter as glAmount
+    but WITHOUT GL_EXCLUSION applied.
+
+    Purpose: cross-check that GL exclusion accounts (5391020, 5211010) have
+    no impact on this plant/period. If tbAmount == glAmount → "OK".
+    If they differ → excluded accounts have postings here → "DIFF".
+
+    Uses v_gl directly (not v_gl_summary) so cost-center filter is preserved.
+    Returns None on query error.
     """
+    conds = [
+        "CAST(Year AS INTEGER) = ?",
+        f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
+        '"G/L Account" LIKE \'5%\'',
+    ]
+    params: list = [year] + months
+
+    if cc_prefix:
+        conds.append('"Cost Center" LIKE ?')
+        params.append(f"{cc_prefix}%")
+
+    where = " AND ".join(conds)
     try:
         df = query_df(
             f"""
-            SELECT COUNT(*) AS cnt FROM tb_data
-            WHERE plant = ?
-              AND CAST(year AS INTEGER) = ?
-              AND CAST(month AS INTEGER) IN {_in_clause(months)}
+            SELECT
+                "G/L Account"   AS account_code,
+                SUM(net_amount) AS tb_amount
+            FROM v_gl
+            WHERE {where}
+            GROUP BY "G/L Account"
             """,
-            [plant, year] + months,
+            params,
         )
-        return bool(df.iloc[0]["cnt"] > 0) if not df.empty else False
     except Exception:
-        return None  # tb_data view not available yet
+        return None
+
+    if df.empty:
+        return None
+    return {str(k): float(v) for k, v in df.set_index("account_code")["tb_amount"].to_dict().items()}
+
+
+TB_DIFF_TOLERANCE = 0.01  # 1% tolerance — flags if excluded accounts have impact
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -281,12 +312,12 @@ def get_cost_ledger(
         records = _query_gl_by_account(year, months, cc_prefix=None)
         cc_filtered = False
 
-    # Production volume
+    # Production volume (MT) — used as qty denominator for unit cost
     vol_map = _query_production_volume(year, months, plant)
     volume = float(sum(vol_map.values()))
 
-    # TB availability
-    has_tb = _check_tb_data(plant, year, months)
+    # TB amounts from v_gl_summary (Gold aggregate as TB proxy)
+    tb_map = _query_tb_amounts(year, months, cc_prefix)
 
     # Build CostLedgerRow[]
     rows: list[dict] = []
@@ -300,17 +331,29 @@ def get_cost_ledger(
             is_credit = True
         display_amt = abs(gl_amt)
 
-        # TB flag: NO_TB if tb_data not available, OK otherwise
-        tb_flag = "NO_TB" if has_tb is None else ("OK" if has_tb else "PENDING")
+        # qty = production volume MT (same for every row — cost per MT basis)
+        qty        = round(volume, 3) if volume > 0 else None
+        unit_price = round(display_amt / volume, 2) if volume > 0 else None
+
+        # tbAmount = raw v_gl total (same CC filter, no GL exclusions)
+        # Cross-checks whether excluded accounts (5391020/5211010) affect this period
+        tb_raw = tb_map.get(acct) if tb_map is not None else None
+        if tb_raw is None:
+            tb_amount = None
+            tb_flag   = "NO_TB"
+        else:
+            tb_amount = round(abs(tb_raw), 2)
+            diff_pct  = abs(display_amt - tb_amount) / max(tb_amount, 1)
+            tb_flag   = "OK" if diff_pct <= TB_DIFF_TOLERANCE else "DIFF"
 
         rows.append({
             "id":           acct,
             "label":        acct_name or default_label,
             "section":      section,
             "isCredit":     is_credit,
-            "qty":          None,
-            "qtyUnit":      None,
-            "unitPrice":    None,
+            "qty":          qty,
+            "qtyUnit":      "MT" if qty is not None else None,
+            "unitPrice":    unit_price,
             "amount":       display_amt,
             "source":       "KSB1",
             "sourceDetail": None,
@@ -321,7 +364,7 @@ def get_cost_ledger(
             "mb51DiffPct":  None,
             "mb51Flag":     "MANUAL",
             "glAmount":     display_amt,
-            "tbAmount":     None,
+            "tbAmount":     tb_amount,
             "tbFlag":       tb_flag,
         })
 
