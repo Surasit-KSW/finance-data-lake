@@ -160,11 +160,12 @@ def _query_production_volume(
 
     Plant in v_production is string (added by ETL from filename prefix).
     """
+    # v_production columns are case-sensitive (quoted DDL): "Year", "Month", "Material", "Plant"
     conds = [
-        "CAST(Year AS INTEGER) = ?",
-        f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
+        'CAST("Year" AS INTEGER) = ?',
+        f'CAST("Month" AS INTEGER) IN {_in_clause(months)}',
         # Exclude semi-finished CRC (20CRC) — keep finished coated products
-        "Material NOT LIKE '20CRC%'",
+        '"Material" NOT LIKE \'20CRC%\'',
     ]
     params: list = [year] + months
 
