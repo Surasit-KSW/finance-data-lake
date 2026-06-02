@@ -152,12 +152,19 @@ def _query_production_volume(
     plant: str | None = None,
 ) -> dict[str, float]:
     """
-    Return {plant: total_qty} from v_production using actual column names from MB52.
+    Return {plant: total_qty_MT} from v_production (finished goods only).
+
+    Filters to finished-goods material prefixes (20GIC, 20ZMC, 20GCU, 20GIC, etc.)
+    to exclude semi-finished products (20CRC Cold Rolled Coil).
+    Unit in SAP export is KG → divide by 1000 to return MT.
+
     Plant in v_production is string (added by ETL from filename prefix).
     """
     conds = [
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
+        # Exclude semi-finished CRC (20CRC) — keep finished coated products
+        "Material NOT LIKE '20CRC%'",
     ]
     params: list = [year] + months
 
@@ -171,7 +178,7 @@ def _query_production_volume(
             f"""
             SELECT
                 "Plant",
-                SUM("{PROD_QTY_COL}") AS total_qty
+                SUM("{PROD_QTY_COL}") / 1000.0 AS total_qty_mt
             FROM v_production
             WHERE {where}
             GROUP BY "Plant"
@@ -183,7 +190,7 @@ def _query_production_volume(
 
     if df.empty:
         return {}
-    return {str(k): float(v) for k, v in df.set_index("Plant")["total_qty"].to_dict().items()}
+    return {str(k): float(v) for k, v in df.set_index("Plant")["total_qty_mt"].to_dict().items()}
 
 
 def _query_revenue_by_plant(

@@ -48,42 +48,57 @@ for year in years_to_process:
     print(f"🚀 ประมวลผล Production ปี {year}")
     print(f"{'='*50}")
 
-    # Discover plants จาก filenames จริง (ไม่ hardcode)
+    # Discover all XLSX files and parse plant/month from filename
+    # Supports two naming conventions:
+    #   Old: PLANT_YEAR_MONTH.XLSX   e.g. 1300_2025_07.XLSX
+    #   New: PLANT.MONTH.YEAR.XLSX   e.g. 1300.01.2026.XLSX
     all_filenames = os.listdir(source_folder)
-    plants = sorted(set(
-        f.split("_")[0] for f in all_filenames
-        if f.upper().endswith(".XLSX") and "_" in f
-    ))
-    if not plants:
-        print(f"  ⚠️  ไม่พบไฟล์ใดใน {source_folder}")
-        continue
-    print(f"  🏭 พบ Plants: {', '.join(plants)}")
-
-    months = [f"{i:02d}" for i in range(1, 13)]
     all_dataframes = []
     total_files_found = 0
+    plants_found = set()
 
-    for plant in plants:
-        for month in months:
-            for ext in [".XLSX", ".xlsx"]:
-                filename = f"{plant}_{year}_{month}{ext}"
-                file_path = os.path.join(source_folder, filename)
-                if os.path.exists(file_path):
-                    print(f"  ⏳ {filename} ...", end=" ")
-                    try:
-                        df = pd.read_excel(file_path, engine="openpyxl")
-                        df["Source_File"] = filename
-                        df["Plant"] = plant
-                        df["Year"] = int(year)
-                        df["Month"] = int(month)
-                        all_dataframes.append(df)
-                        total_files_found += 1
-                        print(f"✅ {len(df):,} rows")
-                    except Exception as e:
-                        print(f"❌ Error: {e}")
-                    break
-            else:
-                pass  # ไม่แสดง skip message เพื่อลด noise
+    import re
+    for filename in sorted(all_filenames):
+        if not filename.upper().endswith(".XLSX"):
+            continue
+
+        plant = month_num = None
+
+        # Pattern 1: PLANT_YEAR_MONTH.XLSX  (e.g. 1300_2025_07.XLSX)
+        m = re.match(r'^(\d{4})_(\d{4})_(\d{2})\.xlsx$', filename, re.IGNORECASE)
+        if m:
+            plant, yr_str, month_str = m.group(1), m.group(2), m.group(3)
+            if yr_str == str(year):
+                month_num = int(month_str)
+
+        # Pattern 2: PLANT.MONTH.YEAR.XLSX  (e.g. 1300.01.2026.XLSX)
+        if plant is None:
+            m = re.match(r'^(\d{4})\.(\d{2})\.(\d{4})\.xlsx$', filename, re.IGNORECASE)
+            if m:
+                plant, month_str, yr_str = m.group(1), m.group(2), m.group(3)
+                if yr_str == str(year):
+                    month_num = int(month_str)
+
+        if plant is None or month_num is None:
+            continue  # ไม่ตรง pattern ใดเลย
+
+        plants_found.add(plant)
+        file_path = os.path.join(source_folder, filename)
+        print(f"  ⏳ {filename} ...", end=" ")
+        try:
+            df = pd.read_excel(file_path, engine="openpyxl")
+            df["Source_File"] = filename
+            df["Plant"] = plant
+            df["Year"] = int(year)
+            df["Month"] = month_num
+            all_dataframes.append(df)
+            total_files_found += 1
+            print(f"✅ {len(df):,} rows")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
+    if plants_found:
+        print(f"  🏭 พบ Plants: {', '.join(sorted(plants_found))}")
 
     if not all_dataframes:
         print(f"❌ ไม่พบไฟล์ Production ปี {year} เลย")
