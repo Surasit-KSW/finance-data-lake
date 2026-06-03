@@ -288,6 +288,15 @@ def _query_tb_amounts(
 TB_DIFF_TOLERANCE = 0.01  # 1% tolerance — flags if excluded accounts have impact
 
 
+def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
+    """Return True if any GL cost data exists for this plant/period (used as TB proxy in overview)."""
+    cc_prefix = PLANT_CC_PREFIX.get(plant)
+    result = _query_tb_amounts(year, months, cc_prefix)
+    if result is None:
+        return None
+    return bool(result)
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/cost-ledger")
