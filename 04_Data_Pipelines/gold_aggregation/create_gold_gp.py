@@ -111,18 +111,18 @@ for _, r in pool[(pool['Year']==2026) & (pool['Month'].isin([1,2,3]))].iterrows(
 # ─── 4. Allocate COGS pool to plants by qty proportion ───────────────────────
 print('🔧 Allocating by qty proportion...')
 
-# qty per plant per month
-qty_by_plant = revenue[['Year', 'Month', 'Plant', 'qty_sold_st']].copy()
-qty_total    = qty_by_plant.groupby(['Year', 'Month'])['qty_sold_st'].transform('sum')
-qty_by_plant['qty_pct'] = (qty_by_plant['qty_sold_st'] / qty_total).fillna(0)
+# revenue proportion per plant per month
+rev_by_plant = revenue[['Year', 'Month', 'Plant', 'revenue_thb', 'qty_sold_st']].copy()
+rev_total    = rev_by_plant.groupby(['Year', 'Month'])['revenue_thb'].transform('sum')
+rev_by_plant['rev_pct'] = (rev_by_plant['revenue_thb'] / rev_total).fillna(0)
 
 # join pool
-qty_by_plant = qty_by_plant.merge(pool, on=['Year', 'Month'], how='left')
+qty_by_plant = rev_by_plant.merge(pool, on=['Year', 'Month'], how='left')
 
-qty_by_plant['cogs_std_thb']   = (qty_by_plant['qty_pct'] * qty_by_plant['cogs_std_total']).round(2)
-qty_by_plant['cogs_ml_thb']    = (qty_by_plant['qty_pct'] * qty_by_plant['cogs_ml_total']).round(2)
-qty_by_plant['cogs_other_thb'] = (qty_by_plant['qty_pct'] * qty_by_plant['cogs_other_total']).round(2)
-qty_by_plant['cogs_total_thb'] = (qty_by_plant['qty_pct'] * qty_by_plant['cogs_total']).round(2)
+qty_by_plant['cogs_std_thb']   = (qty_by_plant['rev_pct'] * qty_by_plant['cogs_std_total']).round(2)
+qty_by_plant['cogs_ml_thb']    = (qty_by_plant['rev_pct'] * qty_by_plant['cogs_ml_total']).round(2)
+qty_by_plant['cogs_other_thb'] = (qty_by_plant['rev_pct'] * qty_by_plant['cogs_other_total']).round(2)
+qty_by_plant['cogs_total_thb'] = (qty_by_plant['rev_pct'] * qty_by_plant['cogs_total']).round(2)
 
 # ─── 5. Combine ───────────────────────────────────────────────────────────────
 gold = revenue.merge(
