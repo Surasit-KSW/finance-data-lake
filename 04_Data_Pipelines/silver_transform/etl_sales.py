@@ -52,9 +52,17 @@ for year in years_to_process:
     months = [f"{i:02d}" for i in range(1, 13)]
 
     for month in months:
-        # รองรับ filename แบบ sale_YYYY_MM.XLSX และ .xlsx
-        for ext in [".XLSX", ".xlsx"]:
-            filename = f"sale_{year}_{month}{ext}"
+        # รองรับ 2 รูปแบบ filename:
+        #   sale_YYYY_MM.XLSX  (รูปแบบเก่า 2023-2025)
+        #   sale_MM.YYYY.XLSX  (รูปแบบใหม่ 2026+)
+        candidates = [
+            f"sale_{year}_{month}.XLSX",
+            f"sale_{year}_{month}.xlsx",
+            f"sale_{month}.{year}.XLSX",
+            f"sale_{month}.{year}.xlsx",
+        ]
+        found = False
+        for filename in candidates:
             file_path = os.path.join(source_folder, filename)
             if os.path.exists(file_path):
                 print(f"  ⏳ {filename} ...", end=" ")
@@ -67,8 +75,9 @@ for year in years_to_process:
                     print(f"✅ {len(df):,} rows")
                 except Exception as e:
                     print(f"❌ Error: {e}")
+                found = True
                 break
-        else:
+        if not found:
             print(f"  ⏭️  ไม่พบ sale_{year}_{month}.xlsx")
 
     if not all_dataframes:

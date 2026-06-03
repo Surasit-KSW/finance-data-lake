@@ -200,20 +200,17 @@ def _query_revenue_by_plant(
     plant: str | None = None,
 ) -> dict[str, float]:
     """
-    Return {plant: net_revenue_thb} from v_sales.
-    Plant in v_sales is integer (1100, 1200, 1300).
-    Excludes cancelled billings.
+    Return {plant: net_revenue_thb} from gold_revenue_monthly (pre-aggregated Gold table).
+    86 rows total vs 165K raw rows in v_sales — much faster.
     """
     conds = [
-        "CAST(Year AS INTEGER) = ?",
-        f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
-        '"Net Value(THB)" > 0',
-        '(Cancelled = \'nan\' OR Cancelled IS NULL)',
+        "year = ?",
+        f"month IN {_in_clause(months)}",
     ]
     params: list = [year] + months
 
     if plant:
-        conds.append("CAST(Plant AS VARCHAR) = ?")
+        conds.append("plant = ?")
         params.append(str(plant))
 
     where = " AND ".join(conds)
@@ -221,11 +218,11 @@ def _query_revenue_by_plant(
         df = query_df(
             f"""
             SELECT
-                CAST(Plant AS VARCHAR) AS plant_code,
-                SUM("Net Value(THB)")  AS revenue
-            FROM v_sales
+                plant                    AS plant_code,
+                SUM(revenue_thb)         AS revenue
+            FROM gold_revenue_monthly
             WHERE {where}
-            GROUP BY Plant
+            GROUP BY plant
             """,
             params,
         )
@@ -234,6 +231,8 @@ def _query_revenue_by_plant(
 
     if df.empty:
         return {}
+    # Normalise plant code: strip ".0" suffix (e.g. "1100.0" → "1100")
+    df["plant_code"] = df["plant_code"].astype(str).str.replace(r"\.0$", "", regex=True)
     return df.set_index("plant_code")["revenue"].to_dict()
 
 
