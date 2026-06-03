@@ -40,6 +40,7 @@ VIEWS = {
     # wildcard รองรับ Summary_GL_24_25.parquet, Summary_GL_24_26.parquet ฯลฯ
     "v_gl_summary":            os.path.join(GOLD, "Summary_GL_*.parquet"),
     "gold_revenue_monthly":    os.path.join(GOLD, "gold_revenue_monthly.parquet"),
+    "gold_gp_by_plant":        os.path.join(GOLD, "gold_gp_by_plant.parquet"),
 }
 
 # Single-year views for explicit year access

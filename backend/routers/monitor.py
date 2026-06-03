@@ -231,9 +231,68 @@ def _query_revenue_by_plant(
 
     if df.empty:
         return {}
-    # Normalise plant code: strip ".0" suffix (e.g. "1100.0" → "1100")
     df["plant_code"] = df["plant_code"].astype(str).str.replace(r"\.0$", "", regex=True)
     return df.set_index("plant_code")["revenue"].to_dict()
+
+
+def _query_gp_by_plant(
+    year: int,
+    months: list[int],
+    plant: str | None = None,
+) -> dict[str, dict]:
+    """
+    Return {plant: {revenue, cogs_std, cogs_ml, cogs_other, cogs_total, gp_actual, gp_margin_pct}}
+    from gold_gp_by_plant (pre-computed Gold table with company-pool COGS allocation).
+    """
+    conds = [
+        "\"Year\" = ?",
+        f"\"Month\" IN {_in_clause(months)}",
+    ]
+    params: list = [year] + months
+
+    if plant:
+        conds.append("\"Plant\" = ?")
+        params.append(str(plant))
+
+    where = " AND ".join(conds)
+    try:
+        df = query_df(
+            f"""
+            SELECT
+                "Plant"              AS plant_code,
+                SUM(revenue_thb)     AS revenue,
+                SUM(cogs_std_thb)    AS cogs_std,
+                SUM(cogs_ml_thb)     AS cogs_ml,
+                SUM(cogs_other_thb)  AS cogs_other,
+                SUM(cogs_total_thb)  AS cogs_total,
+                SUM(gp_actual)       AS gp_actual
+            FROM gold_gp_by_plant
+            WHERE {where}
+            GROUP BY "Plant"
+            """,
+            params,
+        )
+    except Exception:
+        return {}
+
+    if df.empty:
+        return {}
+
+    df["plant_code"] = df["plant_code"].astype(str).str.replace(r"\.0$", "", regex=True)
+    result = {}
+    for _, row in df.iterrows():
+        rev = float(row["revenue"] or 0)
+        gp  = float(row["gp_actual"] or 0)
+        result[row["plant_code"]] = {
+            "revenue":     round(rev, 2),
+            "cogs_std":    round(float(row["cogs_std"]  or 0), 2),
+            "cogs_ml":     round(float(row["cogs_ml"]   or 0), 2),
+            "cogs_other":  round(float(row["cogs_other"] or 0), 2),
+            "cogs_total":  round(float(row["cogs_total"] or 0), 2),
+            "gp_actual":   round(gp, 2),
+            "gp_margin":   round(gp / rev * 100, 2) if rev > 0 else None,
+        }
+    return result
 
 
 def _query_tb_amounts(
@@ -405,8 +464,8 @@ def get_overview(
     Includes simple alert detection for zero-production periods.
     """
     months = _quarter_months(quarter)
-    vol_map      = _query_production_volume(year, months)
-    revenue_map  = _query_revenue_by_plant(year, months)
+    vol_map  = _query_production_volume(year, months)
+    gp_map   = _query_gp_by_plant(year, months)
 
     plant_summaries: list[dict] = []
     alerts: list[dict] = []
@@ -429,20 +488,18 @@ def get_overview(
             else:
                 conv_total += net_amt
 
-        volume     = float(vol_map.get(plant_code, 0))
-        total_cost = rm_total + conv_total
-        revenue    = float(revenue_map.get(plant_code, 0))
+        volume = float(vol_map.get(plant_code, 0))
 
-        # GP Margin (requires both revenue and cost data)
-        gp_margin = None
-        if revenue > 0 and total_cost > 0:
-            gp_margin = round(((revenue - total_cost) / revenue) * 100, 2)
+        # GP from gold_gp_by_plant (company-pool allocation, validated Q1 2026)
+        gp_data  = gp_map.get(plant_code, {})
+        revenue  = gp_data.get("revenue", 0.0)
+        gp_actual = gp_data.get("gp_actual", None)
+        gp_margin = gp_data.get("gp_margin", None)
 
         # TB check
         has_tb = _check_tb_data(plant_code, year, months)
 
-        # SAP score: count how many key account categories are present
-        # Returns { ok: N, total: 3 } — matches PlantCostCard { ok, total } format
+        # SAP score
         sap_score = None
         if records:
             key_prefixes = ("541", "551", "571")
@@ -453,21 +510,26 @@ def get_overview(
             sap_score = {"ok": len(found), "total": len(key_prefixes)}
 
         plant_summaries.append({
-            "plantName": f"Plant {plant_code}",
-            "plant":     plant_code,
-            "product":   PLANT_LABELS.get(plant_code, plant_code),
-            "rmCost":    round(rm_total, 2),
-            "convCost":  round(conv_total, 2),
-            "total":     round(total_cost, 2),
-            "volume":    round(volume, 3),
-            "revenue":   round(revenue, 2),
-            "gpMargin":  gp_margin,
-            "hasGL":     bool(records),
-            "hasTB":     has_tb,
-            "sapScore":  sap_score,
+            "plantName":  f"Plant {plant_code}",
+            "plant":      plant_code,
+            "product":    PLANT_LABELS.get(plant_code, plant_code),
+            "rmCost":     round(rm_total, 2),
+            "convCost":   round(conv_total, 2),
+            "total":      round(rm_total + conv_total, 2),
+            "volume":     round(volume, 3),
+            "revenue":    round(revenue, 2),
+            "gpActual":   round(gp_actual, 2) if gp_actual is not None else None,
+            "gpMargin":   gp_margin,
+            "cogsStd":    gp_data.get("cogs_std"),
+            "cogsMl":     gp_data.get("cogs_ml"),
+            "cogsTotal":  gp_data.get("cogs_total"),
+            "hasGL":      bool(records),
+            "hasTB":      has_tb,
+            "sapScore":   sap_score,
         })
 
-        # Simple alert: has GL cost but no production volume
+        # Alert: has GL cost but no production volume
+        total_cost = rm_total + conv_total
         if total_cost > 0 and volume == 0:
             alerts.append({
                 "plant":  plant_code,
@@ -475,7 +537,7 @@ def get_overview(
                 "detail": f"Plant {plant_code}: มี GL cost ฿{total_cost/1e6:.1f}M แต่ไม่พบ production qty ใน v_production",
             })
 
-        # Alert: GP margin suspiciously low or negative
+        # Alert: GP margin negative
         if gp_margin is not None and gp_margin < 0:
             alerts.append({
                 "plant":  plant_code,
@@ -590,13 +652,16 @@ def get_pnl(
             "gp":       round(gp, 2),
         })
 
-    # ── Per-plant product summary ────────────────────────────────────────────
+    # ── Per-plant product summary (GP from gold_gp_by_plant) ────────────────
     products = []
-    rev_by_plant = _query_revenue_by_plant(year, months)
+    gp_by_plant  = _query_gp_by_plant(year, months)
     vol_by_plant = _query_production_volume(year, months)
 
     for plant_code in ALL_PLANTS:
-        plant_rev   = float(rev_by_plant.get(plant_code, 0))
+        gp_data     = gp_by_plant.get(plant_code, {})
+        plant_rev   = gp_data.get("revenue", 0.0)
+        plant_gp    = gp_data.get("gp_actual")
+        plant_margin = gp_data.get("gp_margin")
         plant_vol   = float(vol_by_plant.get(plant_code, 0))
         plant_label = PLANT_LABELS.get(plant_code, plant_code)
 
@@ -606,7 +671,8 @@ def get_pnl(
             "volSold":     round(plant_vol, 1),
             "volProduced": round(plant_vol, 1),
             "revenue":     round(plant_rev, 2),
-            "margin":      None,  # requires unit cost — extend with cost-ledger join
+            "gpActual":    round(plant_gp, 2) if plant_gp is not None else None,
+            "margin":      plant_margin,
         })
 
     has_data = any(row["revenue"] > 0 or row["rmCost"] > 0 for row in monthly_pnl)
