@@ -442,15 +442,16 @@ def get_overview(
         # TB check
         has_tb = _check_tb_data(plant_code, year, months)
 
-        # SAP score: rough estimate based on data availability
+        # SAP score: count how many key account categories are present
+        # Returns { ok: N, total: 3 } — matches PlantCostCard { ok, total } format
         sap_score = None
         if records:
-            has_key_accounts = any(
-                str(r.get("account_code", "")).startswith(p)
-                for r in records
-                for p in ("541", "551", "571")
-            )
-            sap_score = 100 if has_key_accounts else 50
+            key_prefixes = ("541", "551", "571")
+            found = {
+                p for r in records for p in key_prefixes
+                if str(r.get("account_code", "")).startswith(p)
+            }
+            sap_score = {"ok": len(found), "total": len(key_prefixes)}
 
         plant_summaries.append({
             "plantName": f"Plant {plant_code}",
