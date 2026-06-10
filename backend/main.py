@@ -20,7 +20,7 @@ from backend.core.config import settings
 from backend.core.database import init_ops_db
 from backend.routers import health, lake, finance, sales, ar, etl, reports
 from backend.routers import financial_tb, gl_detail, audit_data, cost_closing, dashboard
-from backend.routers import monitor, simulation
+from backend.routers import monitor, simulation, tools, briefing
 
 app = FastAPI(
     title=settings.API_TITLE,
@@ -81,6 +81,8 @@ app.include_router(cost_closing.router)   # /api/v1/cost-closing/...
 app.include_router(dashboard.router)      # /api/v1/{financial-performance,liquidity,...}
 app.include_router(monitor.router)        # /api/v1/monitor/...
 app.include_router(simulation.router)     # /api/v1/simulate/...
+app.include_router(tools.router)          # /api/v1/tools/...
+app.include_router(briefing.router)       # /api/v1/briefing/...
 
 
 @app.on_event("startup")
