@@ -329,12 +329,83 @@ def get_cash_flow(
 def get_budget_actual(
     period: str = Query(..., description="Period YYYY-MM"),
 ):
-    """Budget vs Actual — ยังไม่มีข้อมูล budget ใน Data Lake."""
-    _parse_period(period)  # validate format
-    raise HTTPException(
-        status_code=404,
-        detail=(
-            "Budget data not yet loaded into Data Lake. "
-            "Upload a budget Excel file and run the budget ETL script to enable this module."
-        ),
-    )
+    """Budget vs Actual — uses prior-year same month as budget baseline.
+
+    Budget baseline = _gl_monthly(year-1, month)   [same month last year]
+    Actual         = _gl_monthly(year,   month)
+
+    Returns BudgetItem[] matching the frontend BudgetItem interface:
+      { cost_center, cost_center_name, gl_account, gl_account_name,
+        budget_amount, actual_amount, variance_amount, variance_pct }
+    """
+    year, month = _parse_period(period)
+
+    budget_raw = _gl_monthly(year - 1, month)   # prior-year same month
+    actual_raw = _gl_monthly(year,     month)
+
+    if not actual_raw and not budget_raw:
+        raise HTTPException(status_code=404, detail=f"No GL data for period {period}")
+
+    # GL Group → human-readable label mapping
+    GL_LABELS: dict[str, str] = {
+        "4. Revenue":      "Revenue",
+        "5. COGS":         "Cost of Goods Sold",
+        "6. Selling Exp":  "Selling Expenses",
+        "7. Admin Exp":    "Administrative Expenses",
+        "8. Finance Cost": "Finance Cost",
+        "9. Tax":          "Income Tax",
+    }
+    # Revenue is a credit (negative in SAP) — flip sign so positive = revenue earned
+    FLIP_SIGN = {"4. Revenue"}
+
+    all_groups = sorted(set(list(budget_raw.keys()) + list(actual_raw.keys())))
+
+    items = []
+    total_budget = 0.0
+    total_actual = 0.0
+
+    for gl_group in all_groups:
+        label = GL_LABELS.get(gl_group, gl_group)
+        flip  = gl_group in FLIP_SIGN
+
+        b_raw = budget_raw.get(gl_group, 0.0)
+        a_raw = actual_raw.get(gl_group, 0.0)
+
+        budget_amt  = round((-b_raw if flip else b_raw), 2)
+        actual_amt  = round((-a_raw if flip else a_raw), 2)
+        variance    = round(actual_amt - budget_amt, 2)
+        safe_b      = budget_amt if budget_amt != 0 else 1
+        variance_pct = round(variance / abs(safe_b) * 100, 2)
+
+        items.append({
+            "cost_center":       f"GL-{gl_group}",
+            "cost_center_name":  label,
+            "gl_account":        f"GL-{gl_group}",   # prefix avoids false CAPEX match on '7.*' / '8.*'
+            "gl_account_name":   label,
+            "budget_amount":     budget_amt,
+            "actual_amount":     actual_amt,
+            "variance_amount":   variance,
+            "variance_pct":      variance_pct,
+        })
+
+        total_budget += budget_amt
+        total_actual += actual_amt
+
+    total_variance     = round(total_actual - total_budget, 2)
+    safe_total_b       = total_budget if total_budget != 0 else 1
+    total_variance_pct = round(total_variance / abs(safe_total_b) * 100, 2)
+
+    # Prior-year label for tooltip context
+    budget_label = f"{year - 1}-{month:02d} (Prior Year Actuals)"
+
+    return {
+        "period":       period,
+        "budget_label": budget_label,
+        "items":        items,
+        "summary": {
+            "total_budget":        round(total_budget, 2),
+            "total_actual":        round(total_actual, 2),
+            "total_variance":      total_variance,
+            "total_variance_pct":  total_variance_pct,
+        },
+    }
