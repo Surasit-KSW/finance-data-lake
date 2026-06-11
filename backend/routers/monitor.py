@@ -346,6 +346,76 @@ def _query_tb_amounts(
 TB_DIFF_TOLERANCE = 0.01  # 1% tolerance — flags if excluded accounts have impact
 
 
+def _query_mb51_rm_breakdown(
+    year: int,
+    months: list[int],
+    plant: str,
+) -> list[dict] | None:
+    """
+    Return RM input cost breakdown from v_mb51 (master_mb51_2026.parquet).
+    Groups: HRC, GIC, CRC, Chemical, Other.
+
+    Returns list of {material_type, label, amount_thb, pct_of_total}
+    sorted by amount descending. Returns None if v_mb51 not available.
+    """
+    try:
+        df = query_df(
+            f"""
+            SELECT
+                SUM(gi_hrc_amount)    AS hrc,
+                SUM(gi_gic_amount)    AS gic,
+                SUM(gi_crc_amount)    AS crc,
+                SUM(gi_chem_amount)   AS chem,
+                SUM(gi_other_amount)  AS other_amt,
+                SUM(gi_dm_amount)     AS dm_total,
+                SUM(gi_total_amount)  AS grand_total
+            FROM v_mb51
+            WHERE CAST("Year" AS INTEGER) = ?
+              AND CAST("Month" AS INTEGER) IN {_in_clause(months)}
+              AND CAST("Plant" AS VARCHAR) = ?
+            """,
+            [year] + months + [str(plant)],
+        )
+    except Exception:
+        return None
+
+    if df.empty:
+        return None
+
+    row = df.iloc[0]
+    total = float(row["dm_total"] or 0)
+    if total <= 0:
+        return None
+
+    LABELS = {
+        "HRC":   "Hot Rolled Coil",
+        "GIC":   "GIC (Semi-Finished)",
+        "CRC":   "Cold Rolled Coil",
+        "CHEM":  "Chemicals",
+        "OTHER": "Other Direct Materials",
+    }
+
+    items = [
+        ("HRC",   float(row["hrc"]      or 0)),
+        ("GIC",   float(row["gic"]      or 0)),
+        ("CRC",   float(row["crc"]      or 0)),
+        ("CHEM",  float(row["chem"]     or 0)),
+        ("OTHER", float(row["other_amt"]or 0)),
+    ]
+    items.sort(key=lambda x: x[1], reverse=True)
+
+    return [
+        {
+            "material_type": code,
+            "label":         LABELS.get(code, code),
+            "amount_thb":    round(amt, 2),
+            "pct_of_total":  round(amt / total * 100, 1) if total > 0 else 0.0,
+        }
+        for code, amt in items
+        if abs(amt) > 0
+    ]
+
+
 def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
     """Return True if any GL cost data exists for this plant/period (used as TB proxy in overview)."""
     cc_prefix = PLANT_CC_PREFIX.get(plant)
@@ -436,6 +506,9 @@ def get_cost_ledger(
             "tbFlag":       tb_flag,
         })
 
+    # MB51 RM input cost breakdown (HRC/GIC/CRC/Chemical)
+    rm_breakdown = _query_mb51_rm_breakdown(year, months, plant)
+
     return {
         "status":      "ok",
         "plant":       plant,
@@ -446,6 +519,7 @@ def get_cost_ledger(
         "excludedAccounts": sorted(GL_EXCLUSION),
         "count":       len(rows),
         "data":        rows,
+        "rmBreakdown": rm_breakdown,   # list[{material_type, label, amount_thb, pct_of_total}] or null
         "meta": {
             "volume": volume,
             "unit":   "T",
