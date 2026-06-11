@@ -170,8 +170,10 @@ def get_liquidity(
     ar   = abs(by_prefix.get("12", 0.0))
     inv  = abs(by_prefix.get("31", 0.0)) + abs(by_prefix.get("32", 0.0))
 
-    ap       = abs(by_prefix.get("21", 0.0)) + abs(by_prefix.get("22", 0.0))
-    equity   = abs(by_prefix.get("33", 0.0))
+    ap_trade   = abs(by_prefix.get("21", 0.0))   # Accounts payable (21*)
+    ap_other   = abs(by_prefix.get("22", 0.0))   # Other short-term payables (22*)
+    ap         = ap_trade + ap_other
+    equity     = abs(by_prefix.get("33", 0.0))
 
     current_assets      = round(cash + ar + inv, 2)
     current_liabilities = round(ap, 2)
@@ -186,6 +188,8 @@ def get_liquidity(
         "cash_and_equivalents": round(cash, 2),
         "accounts_receivable":  round(ar, 2),
         "inventory":            round(inv, 2),
+        "accounts_payable":     round(ap_trade, 2),   # AP 21* (trade payables)
+        "other_payables":       round(ap_other, 2),   # Other 22* (accruals, etc.)
         "equity":               round(equity, 2),
         "net_assets":           round(equity, 2),   # proxy: equity ≈ net assets from GL 33*
         "current_ratio":        round(current_assets / safe_cl, 2),
