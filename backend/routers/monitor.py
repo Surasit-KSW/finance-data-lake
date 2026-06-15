@@ -167,19 +167,40 @@ def _query_gl_by_account(
     """
     Aggregate v_gl by GL account for cost accounts (5xxx) in the given period.
     Applies GL_EXCLUSION filter.
-    Returns list of {account_code, account_name, gl_amount}.
+    Returns list of {account_code, account_name, cost_center, gl_amount}.
+
+    Plant isolation strategy (two-tier, same cc_prefix for both):
+      • Conv accounts (non-541x): filter by Cost Center LIKE '{cc_prefix}%'
+        SAP posts conversion costs to cost centers with plant-specific prefix.
+      • RM accounts (541x): Cost Center is NULL in GL (posted directly from MB movement).
+        Filter instead by Reference (SAP production order number) LIKE '{cc_prefix}%'
+        e.g. Plant 1300 → orders 1381xxxxxx, 1382xxxxxx all start with '13'.
     """
-    excl_placeholders = _in_clause(list(GL_EXCLUSION)) if GL_EXCLUSION else "('')"
+    # GL accounts in v_gl are stored as float (e.g. 5211010.0) — compare as BIGINT to avoid
+    # "5211010.0" ≠ "5211010" string mismatch that would silently skip the exclusion filter.
+    excl_ints = [int(a) for a in GL_EXCLUSION]
+    excl_placeholders = _in_clause(excl_ints) if excl_ints else "(-1)"
     conds = [
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
-        f"CAST(\"G/L Account\" AS VARCHAR) NOT IN {excl_placeholders}",
+        f"CAST(CAST(\"G/L Account\" AS DOUBLE) AS BIGINT) NOT IN {excl_placeholders}",
     ]
-    params: list = [year] + months + list(GL_EXCLUSION)
+    params: list = [year] + months + excl_ints
 
     if cc_prefix:
-        conds.append('CAST("Cost Center" AS VARCHAR) LIKE ?')
+        # Conv: Cost Center prefix  |  RM (541x): Production order Reference prefix
+        conds.append("""
+            (
+                CAST("Cost Center" AS VARCHAR) LIKE ?
+                OR (
+                    CAST("G/L Account" AS VARCHAR) LIKE '541%'
+                    AND "Cost Center" IS NULL
+                    AND CAST(Reference AS VARCHAR) LIKE ?
+                )
+            )
+        """)
+        params.append(f"{cc_prefix}%")
         params.append(f"{cc_prefix}%")
 
     where = " AND ".join(conds)
@@ -401,7 +422,33 @@ def _query_tb_amounts(
     return {str(k): float(v) for k, v in df.set_index("account_code")["tb_amount"].to_dict().items()}
 
 
-TB_DIFF_TOLERANCE = 0.01  # 1% tolerance — flags if excluded accounts have impact
+TB_DIFF_TOLERANCE  = 0.01  # 1% tolerance — flags if excluded accounts have impact
+MB51_DIFF_TOLERANCE = 0.02  # 2% → OK vs DIFF (total GL RM vs MB51 DM reconciliation)
+
+
+def _query_mb51_total_dm(year: int, months: list[int], plant: str) -> float | None:
+    """
+    Sum total Direct Material cost from v_mb51 for a plant/period.
+
+    v_mb51 is aggregated per production order (no GL account column), so this
+    function is used for total-level GL RM vs MB51 DM reconciliation only.
+    Returns THB total or None if v_mb51 is unavailable or has no data.
+    """
+    try:
+        sql = f"""
+            SELECT SUM(gi_dm_amount) AS total_dm
+            FROM v_mb51
+            WHERE CAST("Year" AS INTEGER) = ?
+              AND CAST("Month" AS INTEGER) IN {_in_clause(months)}
+              AND CAST("Plant" AS VARCHAR) = ?
+        """
+        df = query_df(sql, [year, *months, str(plant)])
+        if df is None or df.empty:
+            return None
+        val = df.iloc[0]["total_dm"]
+        return float(val) if val is not None else None
+    except Exception:
+        return None
 
 
 def _query_mb51_rm_breakdown(
@@ -537,6 +584,9 @@ def get_cost_ledger(
     # TB amounts (account-level, no process split) for cross-check
     tb_map = _query_tb_amounts(year, months, cc_prefix)
 
+    # MB51 total DM for RM reconciliation (total-level only — v_mb51 has no GL account column)
+    mb51_total_dm = _query_mb51_total_dm(year, months, plant)
+
     # ── Build CostLedgerRow[] ─────────────────────────────────────────────────
     # Sort: process order (pk < cr < gi < slit < form < plant), then account
     PROC_ORDER = {"pk": 0, "cr": 1, "gi": 2, "slit": 0, "form": 1, "plant": 99}
@@ -556,8 +606,21 @@ def get_cost_ledger(
         display_amt = abs(gl_amt)
 
         cost_group = _account_to_cost_group(acct)
-        qty        = round(volume, 3) if volume > 0 else None
-        unit_price = round(display_amt / volume, 2) if volume > 0 else None
+
+        # qty / unitPrice semantics:
+        #   RM rows  — per-material consumption qty not available from v_mb51 (no GL account column).
+        #              Leave qty/unitPrice null; mb51Flag assigned after loop from total reconciliation.
+        #   Conv rows — no material qty; unitPrice = cost per output tonne (THB/T produced).
+        if section == "rm":
+            qty        = None
+            qty_unit   = None
+            unit_price = None
+            mb51_flag  = None   # assigned after loop
+        else:
+            qty        = None
+            qty_unit   = None
+            unit_price = round(display_amt / volume, 2) if volume > 0 else None
+            mb51_flag  = "MANUAL"   # conversion cost — MB51 not applicable
 
         # tbAmount: compare process-grouped amount against account-level TB total
         # (TB doesn't split by process — this is an approximate cross-check)
@@ -580,7 +643,7 @@ def get_cost_ledger(
             "process":      proc,
             "costGroup":    cost_group,
             "qty":          qty,
-            "qtyUnit":      "T" if qty is not None else None,
+            "qtyUnit":      qty_unit,
             "unitPrice":    unit_price,
             "amount":       round(display_amt, 2),
             "source":       "KSB1" if section == "conv" else "MB51",
@@ -590,11 +653,37 @@ def get_cost_ledger(
             "dailyFlag":    None,
             "mb51Qty":      None,
             "mb51DiffPct":  None,
-            "mb51Flag":     "MANUAL",
+            "mb51Flag":     mb51_flag,   # None for RM (assigned after loop), "MANUAL" for conv
             "glAmount":     round(display_amt, 2),
             "tbAmount":     tb_amount,
             "tbFlag":       tb_flag,
         })
+
+    # ── Post-loop: MB51 total reconciliation + assign RM flags ──────────────────
+    # Sum GL RM cost (non-credit rows in rm section)
+    total_gl_rm = sum(
+        abs(r["glAmount"])
+        for r in rows
+        if r["section"] == "rm" and not r["isCredit"]
+    )
+
+    if mb51_total_dm is not None and mb51_total_dm > 0 and total_gl_rm > 0:
+        recon_diff  = (total_gl_rm - mb51_total_dm) / mb51_total_dm
+        rm_flag     = "OK" if abs(recon_diff) <= MB51_DIFF_TOLERANCE else "DIFF"
+        mb51_reconcile = {
+            "total_gl_rm":   round(total_gl_rm, 2),
+            "total_mb51_dm": round(mb51_total_dm, 2),
+            "diff_pct":      round(recon_diff * 100, 2),
+            "flag":          rm_flag,
+        }
+    else:
+        rm_flag        = "MANUAL"
+        mb51_reconcile = None
+
+    # Assign computed flag to all RM rows (mb51_flag was left None during loop)
+    for r in rows:
+        if r["mb51Flag"] is None:
+            r["mb51Flag"] = rm_flag
 
     # MB51 RM input cost breakdown (HRC/GIC/CRC/Chemical)
     rm_breakdown = _query_mb51_rm_breakdown(year, months, plant)
@@ -610,7 +699,8 @@ def get_cost_ledger(
         "excludedAccounts": sorted(GL_EXCLUSION),
         "count":       len(rows),
         "data":        rows,
-        "rmBreakdown": rm_breakdown,
+        "rmBreakdown":    rm_breakdown,
+        "mb51Reconcile":  mb51_reconcile,
         "meta": {
             "volume": round(volume, 3),
             "unit":   "T",
