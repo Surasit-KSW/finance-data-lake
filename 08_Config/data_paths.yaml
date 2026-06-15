@@ -39,6 +39,18 @@ bronze:
   inventory:    "01_Bronze_Raw/Inventory_RollStock"
   deposit:     "01_Bronze_Raw/Deposit"
 
+  # Payroll (AMC) — Monthly payroll reports + GL mapping
+  payroll:
+    raw:     "01_Bronze_Raw/Payroll/AMC/{year}"       # AMC Payroll report {mm}.{year}.csv
+    mapping: "01_Bronze_Raw/Payroll/Mapping"          # mapping_template.csv, map GL.csv
+    output:  "01_Bronze_Raw/Payroll/Output/{year}"    # FVB1_FastEntry_*.csv (archive)
+
+  # GA (บริษัท GA) — Plant 2200
+  ga:
+    gl:  "01_Bronze_Raw/GL_Transactions/2026/GA"      # GA_GL_{mm}.2026.XLSX
+    tb:  "01_Bronze_Raw/TB_Snapshots/GA"              # GA_TB_{mm}.2026.XLSX
+    prd: "01_Bronze_Raw/PRD_GI/GA"                    # GA_PRD_{mm}.2026.XLSX
+
   # Specific key files
   files:
     fbl3n: "01_Bronze_Raw/GL_Transactions/sap_fbl3n.XLSX"
@@ -57,6 +69,8 @@ silver:
   # GL: ชื่อไฟล์ตามช่วงปี เช่น Master_GL_24_26.parquet — ใช้ wildcard Master_GL_*.parquet
   gl:         "02_Silver_Cleaned/Master_GL_*.parquet"
   ar:         "02_Silver_Cleaned/master_ar.parquet"
+  ga_performance: "02_Silver_Cleaned/ga_performance_{year}.parquet"   # output of etl_ga_performance.py
+  ga_production:  "02_Silver_Cleaned/ga_production_{year}.parquet"    # PRD metrics (yield, qty)
 
 # ---------------------------------------------------------------------------
 # Gold Layer — Business aggregates (dashboard-ready)

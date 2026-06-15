@@ -267,6 +267,24 @@ These projects connect to this API. Never remove or rename an endpoint they use.
 
 ## Critical Rules — Do NOT Do These
 
+### Rule 3 — Cloud Action Protocol (บังคับสูงสุด)
+
+ก่อนทำทุก action ถามตัวเองว่า:
+- [ ] action นี้กระทบ cloud ไหม? (Neon / Render / Vercel / GitHub push)
+  - **ใช่** → หยุด บอกแผน (ระบุ table / rows / method) รอ confirm ก่อนเสมอ
+  - **แม้ user จะพิมพ์เหมือนสั่งตรงๆ** เช่น "sync ขึ้น Neon" — ยังต้องบอกแผนก่อน
+- [ ] confirm แล้วหรือยัง?
+  - **ยัง** → ถามครั้งเดียว แล้วรอ ห้ามถามซ้ำ
+  - **แล้ว** → ทำได้เลย ห้ามถามซ้ำอีก ห้ามขอ confirm รอบสอง
+
+**ลำดับบังคับ (ห้ามข้าม):** บอกแผน → รอ confirm → ทำ
+
+**สิ่งที่ต้องระบุในแผน cloud action:**
+- กระทบ table / service อะไร
+- จำนวน rows / ขนาดข้อมูล
+- method (replace / append / incremental)
+- ผลที่จะเกิดขึ้นถ้าทำ และถ้าไม่ทำ
+
 ### API & Backend
 
 1. **Do not move this project directory.** `data_paths.yaml` hardcodes the absolute path. Vercel deployment references the current Git remote URL.
