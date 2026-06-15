@@ -173,13 +173,13 @@ def _query_gl_by_account(
     conds = [
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
-        '"G/L Account" LIKE \'5%\'',
-        f'"G/L Account" NOT IN {excl_placeholders}',
+        "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
+        f"CAST(\"G/L Account\" AS VARCHAR) NOT IN {excl_placeholders}",
     ]
     params: list = [year] + months + list(GL_EXCLUSION)
 
     if cc_prefix:
-        conds.append('"Cost Center" LIKE ?')
+        conds.append('CAST("Cost Center" AS VARCHAR) LIKE ?')
         params.append(f"{cc_prefix}%")
 
     where = " AND ".join(conds)
@@ -187,10 +187,10 @@ def _query_gl_by_account(
         df = query_df(
             f"""
             SELECT
-                "G/L Account"                       AS account_code,
-                "G/L Account: Long Text"            AS account_name,
-                COALESCE("Cost Center", '')         AS cost_center,
-                SUM(net_amount)                     AS gl_amount
+                CAST("G/L Account" AS VARCHAR)              AS account_code,
+                CAST("G/L Account: Long Text" AS VARCHAR)   AS account_name,
+                COALESCE(CAST("Cost Center" AS VARCHAR), '') AS cost_center,
+                SUM(net_amount)                             AS gl_amount
             FROM v_gl
             WHERE {where}
             GROUP BY "G/L Account", "G/L Account: Long Text", "Cost Center"
@@ -372,12 +372,12 @@ def _query_tb_amounts(
     conds = [
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
-        '"G/L Account" LIKE \'5%\'',
+        "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
     ]
     params: list = [year] + months
 
     if cc_prefix:
-        conds.append('"Cost Center" LIKE ?')
+        conds.append('CAST("Cost Center" AS VARCHAR) LIKE ?')
         params.append(f"{cc_prefix}%")
 
     where = " AND ".join(conds)
@@ -385,8 +385,8 @@ def _query_tb_amounts(
         df = query_df(
             f"""
             SELECT
-                "G/L Account"   AS account_code,
-                SUM(net_amount) AS tb_amount
+                CAST("G/L Account" AS VARCHAR) AS account_code,
+                SUM(net_amount)                AS tb_amount
             FROM v_gl
             WHERE {where}
             GROUP BY "G/L Account"
