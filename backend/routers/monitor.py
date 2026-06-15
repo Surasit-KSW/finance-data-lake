@@ -64,6 +64,47 @@ PLANT_CC_PREFIX: dict[str, str] = {
     "1200": "12",
 }
 
+# GL account 3-char prefix → costGroup (for frontend cost-group sub-headers)
+ACCOUNT_COST_GROUP: dict[str, str | None] = {
+    "541": None,          # rm — raw material (no cost group sub-header)
+    "531": None,          # rm — by-product credit
+    "532": None,          # rm — by-product credit
+    "551": "labor",
+    "552": "labor",
+    "561": "electricity",
+    "562": "electricity",
+    "571": "depreciation",
+    "572": "depreciation",
+    "581": "spare_rm",    # Repair & Maintenance / Spare Parts
+    "591": "lng_gas",     # LNG / Natural Gas
+    "592": "atm_gas",     # H₂ / N₂ atmosphere gas
+    "593": "chemicals",   # Chemicals & supplies
+    "599": "other",       # Other conversion cost
+}
+
+# Cost center sub-prefix → process key, ordered most-specific first
+# Plant 1300 (GI line): CC 1387110–125 = PK, 1387120–125 = CR, 13872xx = GI
+# Plant 1100 (A1):  CC 1187xxx = Slit, 11872xx = Forming
+# Plant 1200 (A2):  CC 1287xxx = Slit, 12873xx = Forming
+CC_PROCESS_BY_PLANT: dict[str, list[tuple[str, str]]] = {
+    "1300": [
+        ("138711", "pk"),    # Pickling  CC 138711x
+        ("138712", "cr"),    # Cold Roll CC 138712x
+        ("13872",  "gi"),    # GI Line   CC 13872xx
+        ("1381",   "plant"), # Plant-wide overhead
+    ],
+    "1100": [
+        ("11872",  "form"),  # Roll Forming
+        ("1187",   "slit"),  # Slitter
+        ("1181",   "plant"),
+    ],
+    "1200": [
+        ("12873",  "form"),
+        ("1287",   "slit"),
+        ("1281",   "plant"),
+    ],
+}
+
 PLANT_LABELS: dict[str, str] = {
     "1300": "GI — Plant 1300",
     "1100": "Pipe A1 — Plant 1100",
@@ -95,6 +136,22 @@ def _section_for_account(account: str) -> tuple[str, str, bool]:
     if str(account).startswith("5"):
         return "conv", "Other Cost", False
     return "conv", "Other", False
+
+
+def _cc_to_process(cc: str | None, plant: str) -> str:
+    """Map SAP Cost Center code to frontend process key (pk/cr/gi/slit/form/plant)."""
+    if not cc:
+        return "plant"
+    cc_str = str(cc).strip()
+    for prefix, proc in CC_PROCESS_BY_PLANT.get(plant, []):
+        if cc_str.startswith(prefix):
+            return proc
+    return "plant"
+
+
+def _account_to_cost_group(account: str) -> str | None:
+    """Return frontend costGroup key for a GL account, or None for rm/credit accounts."""
+    return ACCOUNT_COST_GROUP.get(str(account)[:3])
 
 
 def _in_clause(items: list) -> str:
@@ -130,13 +187,14 @@ def _query_gl_by_account(
         df = query_df(
             f"""
             SELECT
-                "G/L Account"            AS account_code,
-                "G/L Account: Long Text" AS account_name,
-                SUM(net_amount)          AS gl_amount
+                "G/L Account"                       AS account_code,
+                "G/L Account: Long Text"            AS account_name,
+                COALESCE("Cost Center", '')         AS cost_center,
+                SUM(net_amount)                     AS gl_amount
             FROM v_gl
             WHERE {where}
-            GROUP BY "G/L Account", "G/L Account: Long Text"
-            ORDER BY "G/L Account"
+            GROUP BY "G/L Account", "G/L Account: Long Text", "Cost Center"
+            ORDER BY "G/L Account", "Cost Center"
             """,
             params,
         )
@@ -429,71 +487,103 @@ def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
 
 @router.get("/cost-ledger")
 def get_cost_ledger(
-    plant:   str = Query(..., description="Plant code: 1300, 1100, 1200"),
-    year:    int = Query(2026),
-    quarter: int = Query(1, ge=1, le=4),
+    plant:   str      = Query(..., description="Plant code: 1300, 1100, 1200"),
+    year:    int      = Query(2026),
+    quarter: int      = Query(1, ge=1, le=4),
+    month:   int | None = Query(None, ge=1, le=12, description="Specific month (overrides quarter)"),
 ):
     """
-    GL cost breakdown per plant/quarter → CostLedgerRow[] for Monitor > Cost Ledger page.
+    GL cost breakdown per plant/quarter (or month) → CostLedgerRow[] for Monitor > Cost Ledger.
 
     Aggregates v_gl cost accounts (5xxx) filtered by cost center prefix.
+    Rows include process (pk/cr/gi/slit/form/plant) and costGroup derived from
+    SAP cost center and GL account prefix — ready for CostLedgerTable grouping.
     Excludes internal accounts: 5391020 (ML Variance), 5211010 (Semi-FG COGM).
     Falls back to all-plant GL if cost center filter returns no data.
     """
-    months = _quarter_months(quarter)
+    from collections import defaultdict
+
+    months    = [month] if month else _quarter_months(quarter)
     cc_prefix = PLANT_CC_PREFIX.get(plant)
 
     # Try with cost-center filter first; fall back to no filter
-    records = _query_gl_by_account(year, months, cc_prefix)
-    cc_filtered = bool(cc_prefix and records)
-    if not records and cc_prefix:
-        records = _query_gl_by_account(year, months, cc_prefix=None)
+    raw_records = _query_gl_by_account(year, months, cc_prefix)
+    cc_filtered = bool(cc_prefix and raw_records)
+    if not raw_records and cc_prefix:
+        raw_records = _query_gl_by_account(year, months, cc_prefix=None)
         cc_filtered = False
 
-    # Production volume (MT) — used as qty denominator for unit cost
-    vol_map = _query_production_volume(year, months, plant)
-    volume = float(sum(vol_map.values()))
+    # ── Group raw records by (process, account) ──────────────────────────────
+    # Raw records have one row per (account, cost_center).
+    # We map each cost_center → process, then sum within (process, account).
+    GroupKey = tuple  # (process, account_code)
+    grouped_amt: dict[GroupKey, float] = defaultdict(float)
+    acct_meta: dict[str, tuple[str, str]] = {}   # account_code → (account_name, section_label)
 
-    # TB amounts from v_gl_summary (Gold aggregate as TB proxy)
+    for r in raw_records:
+        acct = str(r.get("account_code") or "")
+        cc   = str(r.get("cost_center") or "")
+        amt  = float(r.get("gl_amount") or 0)
+        proc = _cc_to_process(cc, plant)
+        grouped_amt[(proc, acct)] += amt
+        if acct not in acct_meta:
+            _, default_label, _ = _section_for_account(acct)
+            acct_meta[acct] = (str(r.get("account_name") or ""), default_label)
+
+    # Production volume (MT) — used as unit cost denominator
+    vol_map = _query_production_volume(year, months, plant)
+    volume  = float(sum(vol_map.values()))
+
+    # TB amounts (account-level, no process split) for cross-check
     tb_map = _query_tb_amounts(year, months, cc_prefix)
 
-    # Build CostLedgerRow[]
-    rows: list[dict] = []
-    for i, r in enumerate(records, 1):
-        acct      = str(r.get("account_code") or "")
-        acct_name = str(r.get("account_name") or "")
-        gl_amt    = float(r.get("gl_amount") or 0)
+    # ── Build CostLedgerRow[] ─────────────────────────────────────────────────
+    # Sort: process order (pk < cr < gi < slit < form < plant), then account
+    PROC_ORDER = {"pk": 0, "cr": 1, "gi": 2, "slit": 0, "form": 1, "plant": 99}
+    sorted_keys = sorted(
+        grouped_amt.keys(),
+        key=lambda k: (PROC_ORDER.get(k[0], 99), k[1]),
+    )
 
-        section, default_label, is_credit = _section_for_account(acct)
+    rows: list[dict] = []
+    for proc, acct in sorted_keys:
+        gl_amt    = grouped_amt[(proc, acct)]
+        acct_name, default_label = acct_meta.get(acct, ("", ""))
+
+        section, _, is_credit = _section_for_account(acct)
         if gl_amt < 0:
             is_credit = True
         display_amt = abs(gl_amt)
 
-        # qty = production volume MT (same for every row — cost per MT basis)
+        cost_group = _account_to_cost_group(acct)
         qty        = round(volume, 3) if volume > 0 else None
         unit_price = round(display_amt / volume, 2) if volume > 0 else None
 
-        # tbAmount = raw v_gl total (same CC filter, no GL exclusions)
-        # Cross-checks whether excluded accounts (5391020/5211010) affect this period
+        # tbAmount: compare process-grouped amount against account-level TB total
+        # (TB doesn't split by process — this is an approximate cross-check)
         tb_raw = tb_map.get(acct) if tb_map is not None else None
         if tb_raw is None:
-            tb_amount = None
-            tb_flag   = "NO_TB"
+            tb_amount, tb_flag = None, "NO_TB"
         else:
             tb_amount = round(abs(tb_raw), 2)
             diff_pct  = abs(display_amt - tb_amount) / max(tb_amount, 1)
             tb_flag   = "OK" if diff_pct <= TB_DIFF_TOLERANCE else "DIFF"
 
+        # Unique id: combine process + account so same account in different processes is distinct
+        row_id = f"{proc}_{acct}" if proc != "plant" else acct
+
         rows.append({
-            "id":           acct,
+            "id":           row_id,
             "label":        acct_name or default_label,
             "section":      section,
             "isCredit":     is_credit,
+            "process":      proc,
+            "costGroup":    cost_group,
             "qty":          qty,
-            "qtyUnit":      "MT" if qty is not None else None,
+            "qtyUnit":      "T" if qty is not None else None,
             "unitPrice":    unit_price,
-            "amount":       display_amt,
-            "source":       "KSB1",
+            "amount":       round(display_amt, 2),
+            "source":       "KSB1" if section == "conv" else "MB51",
             "sourceDetail": None,
             "glAccount":    acct,
             "dailyQty":     None,
@@ -501,7 +591,7 @@ def get_cost_ledger(
             "mb51Qty":      None,
             "mb51DiffPct":  None,
             "mb51Flag":     "MANUAL",
-            "glAmount":     display_amt,
+            "glAmount":     round(display_amt, 2),
             "tbAmount":     tb_amount,
             "tbFlag":       tb_flag,
         })
@@ -515,13 +605,14 @@ def get_cost_ledger(
         "plantLabel":  PLANT_LABELS.get(plant, plant),
         "year":        year,
         "quarter":     quarter,
+        "month":       month,
         "ccFiltered":  cc_filtered,
         "excludedAccounts": sorted(GL_EXCLUSION),
         "count":       len(rows),
         "data":        rows,
-        "rmBreakdown": rm_breakdown,   # list[{material_type, label, amount_thb, pct_of_total}] or null
+        "rmBreakdown": rm_breakdown,
         "meta": {
-            "volume": volume,
+            "volume": round(volume, 3),
             "unit":   "T",
         },
     }
