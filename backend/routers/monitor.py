@@ -815,88 +815,101 @@ def get_pnl(
     quarter: int = Query(1, ge=1, le=4),
 ):
     """
-    Monthly P&L breakdown per quarter — Revenue + Cost → GP per month/plant.
-    Uses v_sales (Net Value THB) for revenue, v_gl (5xxx) for production cost.
-    """
-    months = _quarter_months(quarter)
-    month_labels = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
-                    5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
-                    9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+    Monthly P&L breakdown — Revenue + GP from gold_gp_by_plant, GL cost split from v_gl.
 
-    # ── Monthly Revenue from v_sales ────────────────────────────────────────
+    Revenue source: gold_gp_by_plant (pre-computed; v_sales not loaded into DuckDB).
+    GL costs: dual-filter (CC LIKE 11/12/13% OR 541x+CC IS NULL+Reference LIKE 11/12/13%)
+              + BIGINT cast for GL_EXCLUSION to handle parquet float-stored account codes.
+    GP: from gold table (includes ML adjustments / WIP netting — more accurate than GL).
+    """
+    months      = _quarter_months(quarter)
+    month_labels = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
+                    7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+
+    # ── Monthly Revenue + GP from gold_gp_by_plant (AMC plants 1100/1200/1300) ─
     try:
-        rev_df = query_df(
+        gold_df = query_df(
             f"""
             SELECT
-                CAST(Month AS INTEGER)   AS month,
-                CAST(Plant AS VARCHAR)   AS plant_code,
-                SUM("Net Value(THB)")    AS revenue
-            FROM v_sales
+                CAST(Month AS INTEGER)                    AS month,
+                CAST(CAST(Plant AS DOUBLE) AS BIGINT)     AS plant_int,
+                revenue_thb                               AS revenue,
+                gp_actual                                 AS gp_actual,
+                qty_sold_st                               AS qty_sold_st
+            FROM gold_gp_by_plant
             WHERE CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}
-              AND "Net Value(THB)" > 0
-              AND (Cancelled = 'nan' OR Cancelled IS NULL)
-            GROUP BY Month, Plant
-            ORDER BY Month, Plant
+              AND CAST(CAST(Plant AS DOUBLE) AS BIGINT) IN (1100, 1200, 1300)
+            ORDER BY month, plant_int
             """,
             [year] + months,
         )
     except Exception:
-        rev_df = None
+        gold_df = None
 
-    # ── Monthly Cost from v_gl (5xxx, exclude internal accounts) ───────────
-    excl_ph = _in_clause(list(GL_EXCLUSION))
+    # ── Monthly GL Cost: RM + Conv per month (AMC plants only, dual-filter) ──
+    excl_ints = [int(a) for a in GL_EXCLUSION]
+    excl_ph   = _in_clause(excl_ints)
     try:
         cost_df = query_df(
             f"""
             SELECT
-                CAST(Month AS INTEGER)   AS month,
-                SUM(CASE WHEN "G/L Account" LIKE '541%'
-                         OR "G/L Account" LIKE '531%'
-                         OR "G/L Account" LIKE '532%'
+                CAST(Month AS INTEGER) AS month,
+                SUM(CASE WHEN CAST("G/L Account" AS VARCHAR) LIKE '541%'
+                         OR CAST("G/L Account" AS VARCHAR) LIKE '531%'
+                         OR CAST("G/L Account" AS VARCHAR) LIKE '532%'
                     THEN net_amount ELSE 0 END) AS rm_cost,
-                SUM(CASE WHEN "G/L Account" LIKE '5%'
-                         AND "G/L Account" NOT LIKE '541%'
-                         AND "G/L Account" NOT LIKE '531%'
-                         AND "G/L Account" NOT LIKE '532%'
+                SUM(CASE WHEN CAST("G/L Account" AS VARCHAR) LIKE '5%'
+                         AND NOT (CAST("G/L Account" AS VARCHAR) LIKE '541%'
+                              OR CAST("G/L Account" AS VARCHAR) LIKE '531%'
+                              OR CAST("G/L Account" AS VARCHAR) LIKE '532%')
                     THEN net_amount ELSE 0 END) AS conv_cost
             FROM v_gl
             WHERE CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}
-              AND "G/L Account" LIKE '5%'
-              AND "G/L Account" NOT IN {excl_ph}
+              AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
+              AND CAST(CAST("G/L Account" AS DOUBLE) AS BIGINT) NOT IN {excl_ph}
+              AND (
+                  CAST("Cost Center" AS VARCHAR) LIKE '11%'
+                  OR CAST("Cost Center" AS VARCHAR) LIKE '12%'
+                  OR CAST("Cost Center" AS VARCHAR) LIKE '13%'
+                  OR (
+                      CAST("G/L Account" AS VARCHAR) LIKE '541%'
+                      AND "Cost Center" IS NULL
+                      AND (
+                          CAST(Reference AS VARCHAR) LIKE '11%'
+                          OR CAST(Reference AS VARCHAR) LIKE '12%'
+                          OR CAST(Reference AS VARCHAR) LIKE '13%'
+                      )
+                  )
+              )
             GROUP BY Month
             ORDER BY Month
             """,
-            [year] + months + list(GL_EXCLUSION),
+            [year] + months + excl_ints,
         )
     except Exception:
         cost_df = None
 
-    # ── Build monthly P&L rows ───────────────────────────────────────────────
+    # ── Build monthly P&L rows ─────────────────────────────────────────────────
     monthly_pnl = []
     for mo in months:
         label = month_labels.get(mo, str(mo))
 
-        # Revenue: sum across all plants for this month
-        revenue = 0.0
-        if rev_df is not None and not rev_df.empty:
-            mo_rev = rev_df[rev_df["month"] == mo]
-            revenue = float(mo_rev["revenue"].sum()) if not mo_rev.empty else 0.0
+        # Revenue + GP from gold (sum across AMC plants)
+        revenue = gp_gold = 0.0
+        if gold_df is not None and not gold_df.empty:
+            mo_gold  = gold_df[gold_df["month"] == mo]
+            revenue  = float(mo_gold["revenue"].sum())
+            gp_gold  = float(mo_gold["gp_actual"].sum())
 
-        # Costs
+        # GL costs (absolute value — cost accounts are positive debits)
         rm_cost = conv_cost = 0.0
         if cost_df is not None and not cost_df.empty:
             mo_cost = cost_df[cost_df["month"] == mo]
             if not mo_cost.empty:
-                rm_cost   = float(mo_cost.iloc[0]["rm_cost"])
-                conv_cost = float(mo_cost.iloc[0]["conv_cost"])
-
-        # Credits are stored negative → negate rm_cost if negative
-        if rm_cost < 0:
-            rm_cost = abs(rm_cost)
-
-        gp = revenue - rm_cost - conv_cost
+                rm_cost   = abs(float(mo_cost.iloc[0]["rm_cost"]))
+                conv_cost = abs(float(mo_cost.iloc[0]["conv_cost"]))
 
         monthly_pnl.append({
             "label":    label,
@@ -904,28 +917,41 @@ def get_pnl(
             "revenue":  round(revenue, 2),
             "rmCost":   round(rm_cost, 2),
             "convCost": round(conv_cost, 2),
-            "gp":       round(gp, 2),
+            "gp":       round(gp_gold, 2),   # from gold — includes ML adj / WIP netting
         })
 
-    # ── Per-plant product summary (GP from gold_gp_by_plant) ────────────────
-    products = []
-    gp_by_plant  = _query_gp_by_plant(year, months)
+    # ── Per-plant product summary (with RM/conv split from GL) ───────────────
+    products    = []
+    gp_by_plant = _query_gp_by_plant(year, months)
     vol_by_plant = _query_production_volume(year, months)
 
     for plant_code in ALL_PLANTS:
-        gp_data     = gp_by_plant.get(plant_code, {})
-        plant_rev   = gp_data.get("revenue", 0.0)
-        plant_gp    = gp_data.get("gp_actual")
+        cc_prefix = PLANT_CC_PREFIX.get(plant_code)
+        records   = _query_gl_by_account(year, months, cc_prefix)
+
+        rm_total = conv_total = 0.0
+        for r in records:
+            acct   = str(r.get("account_code") or "")
+            gl_amt = float(r.get("gl_amount") or 0)
+            section, _, is_credit = _section_for_account(acct)
+            net_amt = -abs(gl_amt) if (is_credit or gl_amt < 0) else abs(gl_amt)
+            if section == "rm": rm_total   += net_amt
+            else:               conv_total += net_amt
+
+        gp_data      = gp_by_plant.get(plant_code, {})
+        plant_vol    = float(vol_by_plant.get(plant_code, 0))
+        plant_rev    = gp_data.get("revenue", 0.0)
+        plant_gp     = gp_data.get("gp_actual")
         plant_margin = gp_data.get("gp_margin")
-        plant_vol   = float(vol_by_plant.get(plant_code, 0))
-        plant_label = PLANT_LABELS.get(plant_code, plant_code)
 
         products.append({
-            "product":     plant_label,
+            "product":     PLANT_LABELS.get(plant_code, plant_code),
             "plant":       plant_code,
             "volSold":     round(plant_vol, 1),
             "volProduced": round(plant_vol, 1),
             "revenue":     round(plant_rev, 2),
+            "rmCost":      round(rm_total, 2),
+            "convCost":    round(conv_total, 2),
             "gpActual":    round(plant_gp, 2) if plant_gp is not None else None,
             "margin":      plant_margin,
         })
@@ -933,10 +959,10 @@ def get_pnl(
     has_data = any(row["revenue"] > 0 or row["rmCost"] > 0 for row in monthly_pnl)
 
     return {
-        "status":      "ok",
-        "year":        year,
-        "quarter":     quarter,
-        "usingMock":   not has_data,
-        "monthlyPnl":  monthly_pnl,
-        "products":    products,
+        "status":     "ok",
+        "year":       year,
+        "quarter":    quarter,
+        "usingMock":  not has_data,
+        "monthlyPnl": monthly_pnl,
+        "products":   products,
     }
