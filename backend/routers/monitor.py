@@ -530,6 +530,147 @@ def _check_tb_data(plant: str, year: int, months: list[int]) -> bool | None:
     return bool(result)
 
 
+# Per-plant mapping: input_type → list of (row_id, label, process, gl_account, amount_col)
+# CRC input_type is split: CRC substrate → cr, Chemicals (zinc etc.) → gi
+_RM_MATERIAL_CONFIG: dict[str, list[tuple]] = {
+    "1300": [  # GI Plant
+        ("HRC",          "hrc",      "HRC Input Cost",           "pk",   "gi_hrc_amount"),
+        ("CRC",          "crc",      "CRC — Cold Rolled Coil",   "cr",   "gi_crc_amount"),
+        ("CHEM_GI",      "chem_gi",  "Chemicals & Zinc (GI Line)","gi",  "gi_chem_amount"),  # from CRC orders
+        ("CHEM",         "chem",     "Process Chemicals",         "gi",   "gi_chem_amount"),  # standalone chem orders
+    ],
+    "1100": [  # A1 Plant
+        ("GIC",  "gic",  "GIC — Galvanized Iron Coil", "slit", "gi_gic_amount"),
+        ("HRC",  "hrc",  "HRC Input Cost",             "slit", "gi_hrc_amount"),
+        ("CHEM", "chem", "Chemicals",                  "slit", "gi_chem_amount"),
+    ],
+    "1200": [  # A2 Plant
+        ("HRC",  "hrc",  "HRC Input Cost",              "slit", "gi_hrc_amount"),
+        ("GIC",  "gic",  "GIC — Galvanized Iron Coil",  "slit", "gi_gic_amount"),
+        ("CHEM", "chem", "Chemicals",                   "slit", "gi_chem_amount"),
+    ],
+}
+
+_RM_GL_ACCOUNT: dict[str, str] = {
+    "hrc":     "5411010",
+    "crc":     "5411020",
+    "chem_gi": "5411010",
+    "chem":    "5411010",
+    "gic":     "5411010",
+}
+
+
+def _build_rm_material_rows(year: int, months: list[int], plant: str) -> list[dict] | None:
+    """
+    Build per-material RM rows from v_mb51 input_type grouping.
+
+    Returns CostLedgerRow-compatible dicts with correct process assignment.
+    These replace the aggregated GL 5411010/5411020 rows for clearer cost structure display.
+
+    For GI (Plant 1300):
+      - HRC orders  → HRC Input Cost       → process 'pk'
+      - CRC orders  → CRC substrate        → process 'cr'  (gi_crc_amount)
+                    → Chemicals & Zinc     → process 'gi'  (gi_chem_amount)
+      - chem orders → Process Chemicals    → process 'gi'
+
+    Returns None if v_mb51 is unavailable or returns no data.
+    """
+    try:
+        df = query_df(
+            f"""
+            SELECT
+                UPPER(input_type)     AS itype,
+                SUM(gi_hrc_amount)    AS hrc,
+                SUM(gi_gic_amount)    AS gic,
+                SUM(gi_crc_amount)    AS crc,
+                SUM(gi_chem_amount)   AS chem,
+                SUM(gi_other_amount)  AS other_amt,
+                SUM(gi_dm_amount)     AS dm_total
+            FROM v_mb51
+            WHERE CAST("Year" AS INTEGER) = ?
+              AND CAST("Month" AS INTEGER) IN {_in_clause(months)}
+              AND CAST("Plant" AS VARCHAR) = ?
+            GROUP BY UPPER(input_type)
+            ORDER BY dm_total DESC
+            """,
+            [year] + months + [str(plant)],
+        )
+    except Exception:
+        return None
+
+    if df is None or df.empty:
+        return None
+
+    # Build amount lookup: {itype: {col: amount}}
+    amounts: dict[str, dict[str, float]] = {}
+    for _, row in df.iterrows():
+        itype = str(row["itype"]).upper()
+        amounts[itype] = {
+            "hrc":      float(row["hrc"]      or 0),
+            "gic":      float(row["gic"]      or 0),
+            "crc":      float(row["crc"]      or 0),
+            "chem":     float(row["chem"]     or 0),
+            "other":    float(row["other_amt"]or 0),
+            "dm_total": float(row["dm_total"] or 0),
+        }
+
+    config = _RM_MATERIAL_CONFIG.get(plant, [])
+    rows: list[dict] = []
+
+    for row_id, amt_key, label, process, _col in config:
+        # Determine which input_type and amount column to use
+        if row_id == "CHEM_GI":
+            # Chemicals & Zinc from CRC orders (gi_chem_amount within CRC input_type)
+            amt = amounts.get("CRC", {}).get("chem", 0.0)
+        elif row_id == "CHEM":
+            # Standalone chemical orders
+            amt = amounts.get("CHEM", {}).get("chem", 0.0)
+        elif row_id == "HRC":
+            amt = amounts.get("HRC", {}).get("hrc", 0.0)
+        elif row_id == "CRC":
+            amt = amounts.get("CRC", {}).get("crc", 0.0)
+        elif row_id == "GIC":
+            # GIC can appear as GIC or HRC input_type depending on plant ETL
+            gic = amounts.get("GIC", {}).get("gic", 0.0)
+            hrc = amounts.get("HRC", {}).get("hrc", 0.0)  # A1 HRC-labeled GIC
+            amt = gic if gic > 0 else hrc
+        else:
+            continue
+
+        if amt <= 0:
+            continue
+
+        gl_acct = _RM_GL_ACCOUNT.get(amt_key, "5411010")
+
+        rows.append({
+            "id":           f"rm_{amt_key}",
+            "label":        label,
+            "section":      "rm",
+            "isCredit":     False,
+            "isTransfer":   False,
+            "process":      process,
+            "glAccount":    gl_acct,
+            "costGroup":    None,
+            "qty":          None,
+            "qtyUnit":      None,
+            "unitPrice":    None,
+            "amount":       round(amt, 2),
+            "source":       "MB51",
+            "sourceDetail": f"input_type={row_id}",
+            "glAmount":     round(amt, 2),
+            "dailyQty":     None,
+            "dailyAmount":  None,
+            "dailyFlag":    None,
+            "mb51Qty":      None,
+            "mb51DiffPct":  None,
+            "mb51Flag":     "OK",
+            "tbAmount":     None,
+            "tbFlag":       "NO_TB",
+        })
+
+    return rows if rows else None
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/cost-ledger")
@@ -688,6 +829,9 @@ def get_cost_ledger(
     # MB51 RM input cost breakdown (HRC/GIC/CRC/Chemical)
     rm_breakdown = _query_mb51_rm_breakdown(year, months, plant)
 
+    # MB51 per-material rows — replaces GL aggregate RM rows for cost structure display
+    rm_material_rows = _build_rm_material_rows(year, months, plant)
+
     return {
         "status":      "ok",
         "plant":       plant,
@@ -700,6 +844,7 @@ def get_cost_ledger(
         "count":       len(rows),
         "data":        rows,
         "rmBreakdown":    rm_breakdown,
+        "rmMaterialRows": rm_material_rows,   # per-material rows from MB51 (replaces GL 541x aggregates)
         "mb51Reconcile":  mb51_reconcile,
         "meta": {
             "volume": round(volume, 3),
