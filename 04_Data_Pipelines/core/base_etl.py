@@ -140,12 +140,11 @@ class BaseSilverETL(ABC):
         rows_out = len(df_final)
 
         status = "warning" if warnings else "success"
+        symbol = "✅" if status == "success" else "⚠ "
+        print(f"  [{self.company_code}] {self.domain} {symbol} {rows_out:,} rows → {self._output_path().name}")
         if warnings:
-            print(f"  ⚠  [{self.company_code}] {self.domain} → {rows_out:,} rows  ({self._output_path().name})  {len(warnings)} warning(s)")
             for w in warnings:
-                print(f"    {w}")
-        else:
-            print(f"  ✅ [{self.company_code}] {self.domain} → {rows_out:,} rows  ({self._output_path().name})")
+                print(f"    ⚠  {w}")
 
         return {
             "company_code": self.company_code,
@@ -161,4 +160,4 @@ class BaseSilverETL(ABC):
         out = self._output_path()
         out.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(out, engine="pyarrow", index=False)
-        print(f"  Saved: {out}")
+        print(f"  💾 Saved: {out}")
