@@ -31,21 +31,36 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 PIPELINES_DIR = PROJECT_ROOT / "04_Data_Pipelines"
 PYTHON = sys.executable
 
-# ── sys.path setup สำหรับ import core ────────────────────────────────────────
+# ── sys.path setup สำหรับ import core + ETL classes ──────────────────────────
 sys.path.insert(0, str(PIPELINES_DIR))
+
 from core.registry import CompanyRegistry
+from silver_transform.etl_gl import GLTransformETL
+from silver_transform.etl_sales import SalesTransformETL
+from silver_transform.etl_production import ProductionTransformETL
+from silver_transform.etl_ar import ARTransformETL
 
 REGISTRY = CompanyRegistry(
     config_path=PROJECT_ROOT / "08_Config" / "company_registry.yaml",
     project_root=PROJECT_ROOT,
 )
 
-# Mapping: domain → ETL script path
-DOMAIN_SCRIPTS = {
-    "gl":         PIPELINES_DIR / "silver_transform" / "etl_gl.py",
-    "sales":      PIPELINES_DIR / "silver_transform" / "etl_sales.py",
-    "production": PIPELINES_DIR / "silver_transform" / "etl_production.py",
-    "ar":         PIPELINES_DIR / "silver_transform" / "etl_ar.py",
+SILVER_PATH = PROJECT_ROOT / "02_Silver_Cleaned"
+
+# Mapping: domain → ETL class
+ETL_CLASSES = {
+    "gl":         GLTransformETL,
+    "sales":      SalesTransformETL,
+    "production": ProductionTransformETL,
+    "ar":         ARTransformETL,
+}
+
+# Mapping: domain → constructor kwarg name for the bronze path
+BRONZE_PATH_KWARG = {
+    "gl":         "bronze_gl_path",
+    "sales":      "bronze_sales_path",
+    "production": "bronze_prod_path",
+    "ar":         "bronze_ar_path",
 }
 
 GOLD_SCRIPTS = {
@@ -76,8 +91,40 @@ def run_script(script: Path, extra_args: list = None, label: str = "") -> bool:
         return False
 
 
-def run_silver_for_company(company_name: str, domain: str = None, year: int = None):
-    """Run silver ETL for one company. Returns list of (label, success) tuples."""
+def run_domain(company_name: str, domain: str, silver_path: Path, bronze_base: Path, year: int = None) -> tuple:
+    """
+    Instantiate and run a single domain's ETL class directly.
+
+    Returns:
+        (company_name, domain, result_dict, elapsed_seconds)
+    """
+    cfg = REGISTRY.get(company_name)
+    ETLClass = ETL_CLASSES[domain]
+    bronze_kwarg = BRONZE_PATH_KWARG[domain]
+
+    kwargs = {
+        "company_code": cfg["company_code"],
+        "silver_path":  silver_path,
+        bronze_kwarg:   bronze_base,
+    }
+    # ar ETL does not support year parameter
+    if domain != "ar" and year is not None:
+        kwargs["year"] = year
+
+    etl = ETLClass(**kwargs)
+    t0 = time.time()
+    result = etl.run()
+    elapsed = time.time() - t0
+    return (company_name, domain, result, elapsed)
+
+
+def run_silver_for_company(company_name: str, domain: str = None, year: int = None) -> list:
+    """
+    Run silver ETL for one company using direct ETL class imports.
+
+    Returns list of dicts:
+        {"company": name, "domain": domain, "status": ..., "rows_out": N, "elapsed": t}
+    """
     try:
         company = REGISTRY.get(company_name)
     except KeyError as e:
@@ -88,35 +135,72 @@ def run_silver_for_company(company_name: str, domain: str = None, year: int = No
     results = []
 
     for dom in domains:
-        if dom not in DOMAIN_SCRIPTS:
-            print(f"  ⚠️  No ETL script for domain '{dom}' — skipping")
+        if dom not in ETL_CLASSES:
+            print(f"  ⚠  No ETL class for domain '{dom}' — skipping")
             continue
         if dom not in company["bronze_paths"]:
-            print(f"  ⚠️  Company '{company_name}' has no Bronze path for '{dom}' — skipping")
+            print(f"  ⚠  Company '{company_name}' has no Bronze path for '{dom}' — skipping")
             continue
 
-        args = ["--company", company_name]
-        if year:
-            args += ["--year", str(year)]
+        bronze_path = company["bronze_paths"][dom]
+        try:
+            co_name, domain_run, result, elapsed = run_domain(
+                company_name, dom, SILVER_PATH, bronze_path, year=year
+            )
+        except Exception as exc:
+            print(f"  ❌ [{company_name}] {dom} — exception: {exc}")
+            results.append({
+                "company": company_name,
+                "domain": dom,
+                "status": "failed",
+                "rows_out": 0,
+                "elapsed": 0.0,
+            })
+            continue
 
-        label = f"[{company_name}] {dom}"
-        ok = run_script(DOMAIN_SCRIPTS[dom], args, label)
-        results.append((label, ok))
+        rows_out = result.get("rows_out", 0)
+        status = result.get("status", "failed")
+
+        if status == "skipped" or rows_out == 0:
+            print(f"  [{company_name}]   {dom:<12}  ⚠  0 rows — no files found in Bronze, skipped")
+        elif status == "warning":
+            print(f"  [{company_name}]   {dom:<12}  ⚠  {rows_out:>7,} rows  ({elapsed:.1f}s)")
+        else:
+            print(f"  [{company_name}]   {dom:<12}  ✓  {rows_out:>7,} rows  ({elapsed:.1f}s)")
+
+        results.append({
+            "company": company_name,
+            "domain": dom,
+            "status": status,
+            "rows_out": rows_out,
+            "elapsed": elapsed,
+        })
 
     return results
 
 
 def print_summary(results: list):
-    passed = sum(1 for _, ok in results if ok)
-    failed = sum(1 for _, ok in results if not ok)
-    total = len(results)
-    print(f"\n{'='*55}")
-    print(f"  สรุปผล: ✅ {passed}/{total} tasks สำเร็จ", end="")
-    if failed:
-        print(f"  ❌ {failed} พบ Error")
-    else:
-        print()
-    print(f"{'='*55}\n")
+    """
+    Print final summary. Accepts both old (label, bool) tuples and new dict format.
+    """
+    # Support old tuple format for backward compat (used by gold/init-db results)
+    def _is_ok(r):
+        if isinstance(r, dict):
+            return r.get("status") in ("success", "warning")
+        return r[1]  # old (label, bool) tuple
+
+    def _is_skipped(r):
+        if isinstance(r, dict):
+            return r.get("status") == "skipped"
+        return False
+
+    passed  = sum(1 for r in results if _is_ok(r))
+    skipped = sum(1 for r in results if _is_skipped(r))
+    failed  = sum(1 for r in results if not _is_ok(r) and not _is_skipped(r))
+    total   = len(results)
+
+    print("─" * 60)
+    print(f"Silver: {passed}/{total} passed  |  {skipped} skipped  |  {failed} failed")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -166,7 +250,7 @@ def main():
     run_silver = args.all or args.layer == "silver" or (args.domain and not args.layer)
 
     if run_silver:
-        print(f"\n🚀 Silver layer — companies: {companies_to_run}")
+        print(f"\n Silver layer — companies: {companies_to_run}")
         for company_name in companies_to_run:
             results = run_silver_for_company(company_name, domain=args.domain, year=args.year)
             all_results.extend(results)
@@ -174,7 +258,7 @@ def main():
     # ── Gold tasks ─────────────────────────────────────────────
     run_gold = args.all or args.layer == "gold" or args.include_gold
     if run_gold:
-        print(f"\n🚀 Gold layer")
+        print(f"\n Gold layer")
         for key, script in GOLD_SCRIPTS.items():
             ok = run_script(script, label=f"[gold] {key}")
             all_results.append((f"gold_{key}", ok))
