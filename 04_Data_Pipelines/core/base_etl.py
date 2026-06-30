@@ -122,7 +122,7 @@ class BaseSilverETL(ABC):
         rows_in = len(df_raw)
 
         if df_raw.empty:
-            print(f"[{self.company_code}] {self.domain} WARNING: no data found in Bronze - skipped")
+            print(f"  ⚠  [{self.company_code}] {self.domain} — no data found in Bronze, skipped")
             return {
                 "company_code": self.company_code,
                 "domain": self.domain,
@@ -140,10 +140,12 @@ class BaseSilverETL(ABC):
         rows_out = len(df_final)
 
         status = "warning" if warnings else "success"
-        print(f"[{self.company_code}] {self.domain} {status}: {rows_out:,} rows -> {self._output_path().name}")
         if warnings:
+            print(f"  ⚠  [{self.company_code}] {self.domain} → {rows_out:,} rows  ({self._output_path().name})  {len(warnings)} warning(s)")
             for w in warnings:
-                print(f"  WARNING: {w}")
+                print(f"    {w}")
+        else:
+            print(f"  ✅ [{self.company_code}] {self.domain} → {rows_out:,} rows  ({self._output_path().name})")
 
         return {
             "company_code": self.company_code,
