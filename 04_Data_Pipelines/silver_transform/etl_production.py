@@ -1,125 +1,160 @@
 """
 etl_production.py — Bronze → Silver: Production Data ETL
-รัน: python 04_Data_Pipelines/silver_transform/etl_production.py [year]
-ตัวอย่าง: python 04_Data_Pipelines/silver_transform/etl_production.py 2025
+รัน: python 04_Data_Pipelines/silver_transform/etl_production.py [--company AMC] [--year 2026]
 
-รวมไฟล์ Production รายเดือนจาก Bronze layer → master_production_YYYY.parquet ใน Silver layer
-รูปแบบไฟล์: PLANT_YYYY_MM.XLSX เช่น 1100_2025_01.XLSX
+Output: 02_Silver_Cleaned/master_production_{company_code}.parquet
 """
-
-import pandas as pd
-import os
 import sys
+import re
+import argparse
+from pathlib import Path
+import pandas as pd
 
-# ============================================================
-# 1. กำหนด paths (relative จาก project root)
-# ============================================================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+SCRIPT_DIR = Path(__file__).resolve().parent
+PIPELINES_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(PIPELINES_DIR))
 
-BRONZE_PROD = os.path.join(PROJECT_ROOT, "01_Bronze_Raw", "Production")
-SILVER = os.path.join(PROJECT_ROOT, "02_Silver_Cleaned")
+from core.base_etl import BaseSilverETL
+from core.registry import CompanyRegistry
+from core.utils import detect_year_dirs
 
-# ============================================================
-# 2. รับ year จาก argument หรือ process ทุกปีที่มีโฟลเดอร์
-# ============================================================
-if len(sys.argv) > 1:
-    years_to_process = [sys.argv[1]]
-else:
-    available_years = sorted([
-        d for d in os.listdir(BRONZE_PROD)
-        if os.path.isdir(os.path.join(BRONZE_PROD, d)) and d.isdigit()
-    ])
-    years_to_process = available_years
-    print(f"📅 พบข้อมูลปี: {', '.join(years_to_process)}")
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-# ============================================================
-# 3. Process แต่ละปี
-# ============================================================
-for year in years_to_process:
-    source_folder = os.path.join(BRONZE_PROD, str(year))
-    target_file = os.path.join(SILVER, f"master_production_{year}.parquet")
+PROJECT_ROOT = PIPELINES_DIR.parent
 
-    if not os.path.isdir(source_folder):
-        print(f"\n⚠️  ไม่พบโฟลเดอร์: {source_folder} — ข้าม")
-        continue
+# Column aliases: raw SAP column name → canonical Silver schema name
+COLUMN_ALIASES = {
+    "Actual GR QTY":               "GR_Qty",
+    "GR Qty":                      "GR_Qty",
+    "GR quantity":                  "GR_Qty",
+    "Actual ByProduct Scrap QTY":  "ByProduct_Scrap",
+    "ByProduct Scrap":              "ByProduct_Scrap",
+    "Actual ByProduct Grade B QTY": "Grade_B",
+    "Grade B":                      "Grade_B",
+    "Actual ByProduct Grade C QTY": "Grade_C",
+    "Grade C":                      "Grade_C",
+}
 
-    print(f"\n{'='*50}")
-    print(f"🚀 ประมวลผล Production ปี {year}")
-    print(f"{'='*50}")
 
-    # Discover all XLSX files and parse plant/month from filename
-    # Supports two naming conventions:
-    #   Old: PLANT_YEAR_MONTH.XLSX   e.g. 1300_2025_07.XLSX
-    #   New: PLANT.MONTH.YEAR.XLSX   e.g. 1300.01.2026.XLSX
-    all_filenames = os.listdir(source_folder)
-    all_dataframes = []
-    total_files_found = 0
-    plants_found = set()
+class ProductionTransformETL(BaseSilverETL):
+    """
+    Bronze → Silver ETL for Production Data (SAP MB52 layout).
+    Parses Plant + Month from filenames:
+      Pattern 1: PLANT_YYYY_MM.XLSX  (e.g. 1300_2025_07.XLSX)
+      Pattern 2: PLANT.MM.YYYY.XLSX  (e.g. 1300.01.2026.XLSX)
+    Output: master_production_{company_code}.parquet
+    """
 
-    import re
-    for filename in sorted(all_filenames):
-        if not filename.upper().endswith(".XLSX"):
-            continue
+    def __init__(self, company_code: str, bronze_prod_path: Path, silver_path: Path, year: int = None):
+        super().__init__(company_code=company_code, domain="production", silver_path=silver_path, year=year)
+        self.bronze_prod_path = Path(bronze_prod_path)
 
-        plant = month_num = None
-
-        # Pattern 1: PLANT_YEAR_MONTH.XLSX  (e.g. 1300_2025_07.XLSX)
+    def _parse_filename(self, filename: str):
+        """Returns (plant, year, month) or (None, None, None) if no pattern matches."""
+        # Pattern 1: PLANT_YYYY_MM.XLSX
         m = re.match(r'^(\d{4})_(\d{4})_(\d{2})\.xlsx$', filename, re.IGNORECASE)
         if m:
-            plant, yr_str, month_str = m.group(1), m.group(2), m.group(3)
-            if yr_str == str(year):
-                month_num = int(month_str)
+            return m.group(1), int(m.group(2)), int(m.group(3))
+        # Pattern 2: PLANT.MM.YYYY.XLSX
+        m = re.match(r'^(\d{4})\.(\d{2})\.(\d{4})\.xlsx$', filename, re.IGNORECASE)
+        if m:
+            return m.group(1), int(m.group(3)), int(m.group(2))
+        return None, None, None
 
-        # Pattern 2: PLANT.MONTH.YEAR.XLSX  (e.g. 1300.01.2026.XLSX)
-        if plant is None:
-            m = re.match(r'^(\d{4})\.(\d{2})\.(\d{4})\.xlsx$', filename, re.IGNORECASE)
-            if m:
-                plant, month_str, yr_str = m.group(1), m.group(2), m.group(3)
-                if yr_str == str(year):
-                    month_num = int(month_str)
+    def extract(self) -> pd.DataFrame:
+        if not self.bronze_prod_path.exists():
+            print(f"  ⚠️  Bronze path not found: {self.bronze_prod_path}")
+            return pd.DataFrame()
 
-        if plant is None or month_num is None:
-            continue  # ไม่ตรง pattern ใดเลย
+        years = [self.year] if self.year else detect_year_dirs(self.bronze_prod_path)
+        all_frames = []
 
-        plants_found.add(plant)
-        file_path = os.path.join(source_folder, filename)
-        print(f"  ⏳ {filename} ...", end=" ")
-        try:
-            df = pd.read_excel(file_path, engine="openpyxl")
-            df["Source_File"] = filename
-            df["Plant"] = plant
-            df["Year"] = int(year)
-            df["Month"] = month_num
-            all_dataframes.append(df)
-            total_files_found += 1
-            print(f"✅ {len(df):,} rows")
-        except Exception as e:
-            print(f"❌ Error: {e}")
+        for yr in years:
+            yr_path = self.bronze_prod_path / str(yr)
+            if not yr_path.exists():
+                continue
+            for fpath in sorted(yr_path.iterdir()):
+                if not fpath.suffix.upper() == ".XLSX":
+                    continue
+                plant, file_year, month = self._parse_filename(fpath.name)
+                if plant is None or file_year != yr:
+                    continue
+                print(f"  ⏳ {fpath.name} ...", end=" ")
+                try:
+                    df = pd.read_excel(fpath, engine="openpyxl")
+                    df["Source_File"] = fpath.name
+                    df["Plant"] = plant
+                    df["Year"] = yr
+                    df["Month"] = month
+                    all_frames.append(df)
+                    print(f"✅ {len(df):,} rows")
+                except Exception as e:
+                    print(f"❌ {e}")
 
-    if plants_found:
-        print(f"  🏭 พบ Plants: {', '.join(sorted(plants_found))}")
+        return pd.concat(all_frames, ignore_index=True) if all_frames else pd.DataFrame()
 
-    if not all_dataframes:
-        print(f"❌ ไม่พบไฟล์ Production ปี {year} เลย")
-        continue
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.normalize_columns(df)
 
-    # Concat และ clean
-    master_df = pd.concat(all_dataframes, ignore_index=True)
-    master_df.columns = master_df.columns.str.strip()
+        # Rename raw SAP column names to canonical Silver schema names
+        rename_map = {raw: canonical for raw, canonical in COLUMN_ALIASES.items() if raw in df.columns}
+        if rename_map:
+            df = df.rename(columns=rename_map)
+            for raw, canonical in rename_map.items():
+                print(f"   info  Renamed '{raw}' -> {canonical}")
 
-    # Clean data types
-    for col in master_df.columns:
-        if any(kw in col.upper() for kw in ["AMOUNT", "QTY", "QUANTITY", "COST", "KG"]):
-            if master_df[col].dtype == object:
-                master_df[col] = master_df[col].astype(str).str.replace(",", "", regex=False)
-            master_df[col] = pd.to_numeric(master_df[col], errors="coerce").fillna(0)
-        elif master_df[col].dtype == object:
-            master_df[col] = master_df[col].astype(str)
+        # Clean numeric columns (QTY, AMOUNT, COST, KG keywords + canonical names)
+        df = self.clean_numeric(df, ["AMOUNT", "QTY", "QUANTITY", "COST", "KG",
+                                     "GR_Qty", "ByProduct_Scrap", "Grade_B", "Grade_C"])
 
-    os.makedirs(SILVER, exist_ok=True)
-    master_df.to_parquet(target_file, engine="pyarrow", index=False)
-    print(f"\n💾 บันทึกสำเร็จ: {target_file}")
-    print(f"   📊 {len(master_df):,} rows จาก {total_files_found} ไฟล์, {len(master_df.columns)} columns")
+        # Coerce all remaining object columns to string
+        for col in df.columns:
+            if df[col].dtype == object:
+                df[col] = df[col].astype(str)
 
-print(f"\n✨ etl_production เสร็จสิ้น")
+        return df
+
+    def _output_path(self) -> Path:
+        return self.silver_path / f"master_production_{self.company_code}.parquet"
+
+    def _save(self, df: pd.DataFrame) -> None:
+        """Delete old per-year master_production_YYYY.parquet before saving.
+        Pattern 20[12]? matches years 2010-2029 but NOT company codes (1000-6000)."""
+        for old in self.silver_path.glob("master_production_20[12]?.parquet"):
+            old.unlink()
+            print(f"  🗑️  Deleted old file: {old.name}")
+        super()._save(df)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Production ETL — Bronze → Silver")
+    parser.add_argument("--company", default="AMC")
+    parser.add_argument("--year", type=int)
+    parser.add_argument("year_pos", nargs="?", type=int, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    year = args.year or args.year_pos
+
+    registry = CompanyRegistry(
+        config_path=PROJECT_ROOT / "08_Config" / "company_registry.yaml",
+        project_root=PROJECT_ROOT,
+    )
+    company = registry.get(args.company)
+
+    if "production" not in company["bronze_paths"]:
+        print(f"❌ Company '{args.company}' has no Production Bronze path configured")
+        sys.exit(1)
+
+    etl = ProductionTransformETL(
+        company_code=company["company_code"],
+        bronze_prod_path=company["bronze_paths"]["production"],
+        silver_path=PROJECT_ROOT / "02_Silver_Cleaned",
+        year=year,
+    )
+    result = etl.run()
+    if result["status"] == "skipped":
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

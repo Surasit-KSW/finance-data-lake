@@ -29,31 +29,21 @@ GOLD = os.path.join(PROJECT_ROOT, "03_Gold_DataMarts")
 # 2. ตรวจสอบ Parquet files ที่มีอยู่
 # ============================================================
 VIEWS = {
-    # Silver views — raw cleaned data (multi-year wildcard)
-    "v_sales": os.path.join(SILVER, "master_sales_*.parquet"),
+    # Silver views — per-company files, wildcard across all companies
+    # New naming: master_gl_1000.parquet, master_gl_2000.parquet, etc.
+    "v_gl":         os.path.join(SILVER, "master_gl_*.parquet"),
+    "v_sales":      os.path.join(SILVER, "master_sales_*.parquet"),
     "v_production": os.path.join(SILVER, "master_production_*.parquet"),
-    # GL: wildcard รองรับทุกช่วงปี เช่น Master_GL_24_25.parquet, Master_GL_24_26.parquet
-    "v_gl": os.path.join(SILVER, "Master_GL_*.parquet"),
-    "v_ar": os.path.join(SILVER, "master_ar.parquet"),
+    "v_ar":         os.path.join(SILVER, "master_ar_*.parquet"),
 
     # Gold views — aggregated summaries
-    # wildcard รองรับ Summary_GL_24_25.parquet, Summary_GL_24_26.parquet ฯลฯ
-    "v_gl_summary":            os.path.join(GOLD, "Summary_GL_*.parquet"),
-    "gold_revenue_monthly":    os.path.join(GOLD, "gold_revenue_monthly.parquet"),
-    "gold_gp_by_plant":        os.path.join(GOLD, "gold_gp_by_plant.parquet"),
+    "v_gl_summary":         os.path.join(GOLD, "Summary_GL_*.parquet"),
+    "gold_revenue_monthly": os.path.join(GOLD, "gold_revenue_monthly.parquet"),
+    "gold_gp_by_plant":     os.path.join(GOLD, "gold_gp_by_plant.parquet"),
 }
 
-# Single-year views for explicit year access
-YEAR_VIEWS = {
-    "v_sales_2023": os.path.join(SILVER, "master_sales_2023.parquet"),
-    "v_sales_2024": os.path.join(SILVER, "master_sales_2024.parquet"),
-    "v_sales_2025": os.path.join(SILVER, "master_sales_2025.parquet"),
-    "v_sales_2026": os.path.join(SILVER, "master_sales_2026.parquet"),
-    "v_production_2023": os.path.join(SILVER, "master_production_2023.parquet"),
-    "v_production_2024": os.path.join(SILVER, "master_production_2024.parquet"),
-    "v_production_2025": os.path.join(SILVER, "master_production_2025.parquet"),
-    "v_production_2026": os.path.join(SILVER, "master_production_2026.parquet"),
-}
+# Single-year views removed — use v_gl WHERE Year = YYYY instead
+YEAR_VIEWS = {}
 
 # ============================================================
 # 3. สร้างหรือเปิด DuckDB และสร้าง views
@@ -74,9 +64,13 @@ def create_view(view_name: str, parquet_glob: str) -> bool:
     # normalize path separators สำหรับ DuckDB (ต้องใช้ forward slashes)
     parquet_path = parquet_glob.replace("\\", "/")
 
-    # ตรวจสอบว่ามีไฟล์จริงไหม (glob หรือ single file)
+    # For glob patterns (contains *), use glob to find files
+    # For single files, check existence directly
     import glob as glob_lib
-    matches = glob_lib.glob(parquet_glob)
+    if "*" in parquet_glob:
+        matches = glob_lib.glob(parquet_glob)
+    else:
+        matches = [parquet_glob] if os.path.exists(parquet_glob) else []
     if not matches:
         print(f"  ⏭️  {view_name:<25} ข้ามเพราะไม่พบไฟล์: {os.path.basename(parquet_glob)}")
         return False
@@ -86,19 +80,20 @@ def create_view(view_name: str, parquet_glob: str) -> bool:
     print(f"  ✅ {view_name:<25} {row_count:>12,} rows  ← {os.path.basename(parquet_glob)}")
     return True
 
-print("📋 สร้าง Multi-year views:")
+print("📋 สร้าง Multi-company views:")
 for name, path in VIEWS.items():
     if create_view(name, path):
         created += 1
     else:
         skipped += 1
 
-print("\n📋 สร้าง Single-year views:")
-for name, path in YEAR_VIEWS.items():
-    if create_view(name, path):
-        created += 1
-    else:
-        skipped += 1
+if YEAR_VIEWS:
+    print("\n📋 สร้าง Additional views:")
+    for name, path in YEAR_VIEWS.items():
+        if create_view(name, path):
+            created += 1
+        else:
+            skipped += 1
 
 # ============================================================
 # 4. สรุปผล

@@ -1,0 +1,46 @@
+# company_registry.yaml — Source of truth for AMC Group company definitions
+# company_code: internal identifier (SAP code for SAP companies, sequential for non-SAP)
+# source_type: sap | excel_template
+# bronze_paths: relative to PROJECT_ROOT, per domain
+
+companies:
+  AMC:
+    company_code: "1000"
+    source_type: sap
+    bronze_paths:
+      gl: "01_Bronze_Raw/GL_Transactions"
+      sales: "01_Bronze_Raw/Sales_Reports"
+      production: "01_Bronze_Raw/Production"
+      ar: "01_Bronze_Raw/AR_Data"
+
+  GA:
+    company_code: "2000"
+    source_type: sap
+    bronze_paths:
+      gl: "01_Bronze_Raw/GA/GL_Transactions"
+      sales: "01_Bronze_Raw/GA/Sales_Reports"
+
+  STC:
+    company_code: "3000"
+    source_type: sap
+    bronze_paths:
+      gl: "01_Bronze_Raw/STC/GL_Transactions"
+
+  AMCE:
+    company_code: "4000"
+    source_type: excel_template
+    bronze_paths:
+      gl: "01_Bronze_Raw/AMCE/manual"
+    note: "company codes 4000-6000 are internal identifiers, not SAP codes"
+
+  AMSB:
+    company_code: "5000"
+    source_type: excel_template
+    bronze_paths:
+      gl: "01_Bronze_Raw/AMSB/manual"
+
+  PSM:
+    company_code: "6000"
+    source_type: excel_template
+    bronze_paths:
+      gl: "01_Bronze_Raw/PSM/manual"

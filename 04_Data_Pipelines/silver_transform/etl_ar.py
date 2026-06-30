@@ -1,59 +1,109 @@
 """
 etl_ar.py — Bronze → Silver: Accounts Receivable ETL
-รัน: python 04_Data_Pipelines/silver_transform/etl_ar.py
+รัน: python 04_Data_Pipelines/silver_transform/etl_ar.py [--company AMC]
 
-รวมไฟล์ AR (AR_2023.XLSX, AR_2024.XLSX, ...) จาก Bronze → master_ar_ALL.parquet ใน Silver
+Output: 02_Silver_Cleaned/master_ar_{company_code}.parquet
 """
-
+import sys
+import argparse
+from pathlib import Path
 import pandas as pd
-import os
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+SCRIPT_DIR = Path(__file__).resolve().parent
+PIPELINES_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(PIPELINES_DIR))
 
-BRONZE_AR = os.path.join(PROJECT_ROOT, "01_Bronze_Raw", "AR_Data")
-SILVER = os.path.join(PROJECT_ROOT, "02_Silver_Cleaned")
-TARGET_FILE = os.path.join(SILVER, "master_ar.parquet")
+from core.base_etl import BaseSilverETL
+from core.connectors import SAPConnector
+from core.registry import CompanyRegistry
 
-print(f"\n{'='*50}")
-print(f"🚀 ETL: AR Data → Silver Layer")
-print(f"{'='*50}")
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-ar_files = [f for f in os.listdir(BRONZE_AR) if f.lower().endswith(".xlsx")]
-if not ar_files:
-    print(f"❌ ไม่พบไฟล์ AR ใน: {BRONZE_AR}")
-    raise SystemExit(1)
+PROJECT_ROOT = PIPELINES_DIR.parent
 
-all_dfs = []
-for fname in sorted(ar_files):
-    fpath = os.path.join(BRONZE_AR, fname)
-    print(f"  ⏳ อ่าน {fname} ...", end=" ")
-    try:
-        df = pd.read_excel(fpath, engine="openpyxl")
-        df["Source_File"] = fname
-        all_dfs.append(df)
-        print(f"✅ {len(df):,} rows")
-    except Exception as e:
-        print(f"❌ {e}")
+# Raw SAP column → canonical Silver name
+GL_ACCOUNT_ALIASES = ["GL Account", "G/L Account", "G/L Acct", "Account"]
 
-if not all_dfs:
-    print("❌ ไม่สามารถอ่านไฟล์ได้เลย")
-    raise SystemExit(1)
 
-master_df = pd.concat(all_dfs, ignore_index=True)
-master_df.columns = master_df.columns.str.strip()
+class ARTransformETL(BaseSilverETL):
+    """
+    Bronze → Silver ETL for AR Data (SAP FBL5N layout).
+    Reads AR_YYYY.XLSX files flat from bronze_ar_path (no year subdirs).
+    Output: master_ar_{company_code}.parquet
+    """
 
-# Clean data types
-for col in master_df.columns:
-    if any(kw in col.upper() for kw in ["AMOUNT", "AMT", "BALANCE", "VALUE", "NET"]):
-        if master_df[col].dtype == object:
-            master_df[col] = master_df[col].astype(str).str.replace(",", "", regex=False)
-        master_df[col] = pd.to_numeric(master_df[col], errors="coerce").fillna(0)
-    elif master_df[col].dtype == object:
-        master_df[col] = master_df[col].astype(str)
+    def __init__(self, company_code: str, bronze_ar_path: Path, silver_path: Path):
+        super().__init__(company_code=company_code, domain="ar", silver_path=silver_path)
+        self.bronze_ar_path = Path(bronze_ar_path)
+        self.connector = SAPConnector()
 
-os.makedirs(SILVER, exist_ok=True)
-master_df.to_parquet(TARGET_FILE, engine="pyarrow", index=False)
-print(f"\n💾 บันทึกสำเร็จ: {TARGET_FILE}")
-print(f"   📊 {len(master_df):,} rows, {len(master_df.columns)} columns")
-print(f"\n✨ etl_ar เสร็จสิ้น")
+    def extract(self) -> pd.DataFrame:
+        df = self.connector.read_flat_files(self.bronze_ar_path, glob_pattern="AR_*.XLSX")
+        if df.empty:
+            df = self.connector.read_flat_files(self.bronze_ar_path, glob_pattern="AR_*.xlsx")
+        return df
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.normalize_columns(df)
+
+        # Map GL Account aliases → canonical GL_Account
+        if "GL_Account" not in df.columns:
+            for alias in GL_ACCOUNT_ALIASES:
+                if alias in df.columns:
+                    df = df.rename(columns={alias: "GL_Account"})
+                    print(f"   info  Renamed '{alias}' -> GL_Account")
+                    break
+
+        # Map amount aliases → Net_Amount
+        df = self.map_amount_column(df, aliases=["Net Amount", "Amount", "Balance", "Net_Amount"])
+
+        # Clean numeric columns
+        df = self.clean_numeric(df, ["AMOUNT", "AMT", "BALANCE", "VALUE", "NET"])
+
+        # Coerce remaining object columns to string
+        for col in df.columns:
+            if df[col].dtype == object:
+                df[col] = df[col].astype(str)
+
+        return df
+
+    def _output_path(self) -> Path:
+        return self.silver_path / f"master_ar_{self.company_code}.parquet"
+
+    def _save(self, df: pd.DataFrame) -> None:
+        """Delete old master_ar.parquet before saving."""
+        old = self.silver_path / "master_ar.parquet"
+        if old.exists():
+            old.unlink()
+            print(f"  Deleted old file: {old.name}")
+        super()._save(df)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="AR ETL — Bronze -> Silver")
+    parser.add_argument("--company", default="AMC")
+    args = parser.parse_args()
+
+    registry = CompanyRegistry(
+        config_path=PROJECT_ROOT / "08_Config" / "company_registry.yaml",
+        project_root=PROJECT_ROOT,
+    )
+    company = registry.get(args.company)
+
+    if "ar" not in company["bronze_paths"]:
+        print(f"Company '{args.company}' has no AR Bronze path configured")
+        sys.exit(1)
+
+    etl = ARTransformETL(
+        company_code=company["company_code"],
+        bronze_ar_path=company["bronze_paths"]["ar"],
+        silver_path=PROJECT_ROOT / "02_Silver_Cleaned",
+    )
+    result = etl.run()
+    if result["status"] == "skipped":
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

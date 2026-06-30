@@ -23,8 +23,8 @@ def gl_transactions(
     GL line-item transactions จาก Silver layer (v_gl).
     ใช้สำหรับ audit-reconcile ดึงรายการ GL ของบัญชีที่ระบุ
     """
-    conditions = ["CAST(Year AS INTEGER) = ?"]
-    params: list = [year]
+    conditions = ["company_code = ?", "CAST(Year AS INTEGER) = ?"]
+    params: list = ["1000", year]
 
     if month is not None:
         conditions.append("CAST(Month AS INTEGER) = ?")
@@ -106,8 +106,8 @@ def gl_account_balance(
     Cumulative balance ของ GL Account ที่ระบุ
     ใช้สำหรับ reconcile balance ระหว่างระบบกับ TB
     """
-    conditions = ['"G/L Account" = ?']
-    params: list = [account]
+    conditions = ["company_code = ?", '"G/L Account" = ?']
+    params: list = ["1000", account]
 
     if year:
         conditions.append("CAST(Year AS INTEGER) = ?")
@@ -147,8 +147,8 @@ def list_gl_accounts(
     search: str | None = Query(None, description="ค้นหาตาม account name"),
 ):
     """รายการ GL accounts ทั้งหมดพร้อมยอดรวม"""
-    conditions = ["CAST(Year AS INTEGER) = ?"]
-    params: list = [year]
+    conditions = ["company_code = ?", "CAST(Year AS INTEGER) = ?"]
+    params: list = ["1000", year]
 
     if search:
         conditions.append('"G/L Account: Long Text" ILIKE ?')
