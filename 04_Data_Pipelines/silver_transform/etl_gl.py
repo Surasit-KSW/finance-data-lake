@@ -82,6 +82,10 @@ class GLTransformETL(BaseSilverETL):
         # Clean all numeric columns
         df = self.clean_numeric(df, ["AMOUNT", "AMT", "VALUE"])
 
+        # Rename to canonical Silver schema name
+        if "G/L Account" in df.columns:
+            df = df.rename(columns={"G/L Account": "GL_Account"})
+
         return df
 
     def _output_path(self) -> Path:
@@ -92,6 +96,10 @@ class GLTransformETL(BaseSilverETL):
         for old in self.silver_path.glob("Master_GL_*.parquet"):
             old.unlink()
             print(f"  Deleted old file: {old.name}")
+        # Also delete new-format files for the same company (handles re-runs on Linux CI)
+        output = self._output_path()
+        if output.exists():
+            output.unlink()
         super()._save(df)
 
 

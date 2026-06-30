@@ -1,7 +1,6 @@
 import pandas as pd
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 from core.base_etl import BaseSilverETL
 
 import sys
@@ -75,3 +74,17 @@ def test_run_skips_when_no_bronze_files(etl):
     result = etl.run()
     assert result["status"] == "skipped"
     assert result["rows_in"] == 0
+
+
+def test_transform_renames_gl_account_to_canonical(tmp_path):
+    """transform() must rename G/L Account → GL_Account (canonical Silver schema name)"""
+    etl = GLTransformETL(company_code="1000", bronze_gl_path=tmp_path, silver_path=tmp_path, year=None)
+    df = pd.DataFrame({
+        "G/L Account": ["5411010", "5411020"],
+        "Text": ["Entry A", "Entry B"],
+        "Net Amount": [1000.0, 2000.0],
+        "Posting Date": ["01.01.2025", "15.01.2025"],
+    })
+    result = etl.transform(df)
+    assert "GL_Account" in result.columns
+    assert "G/L Account" not in result.columns
