@@ -30,7 +30,14 @@ def etl(tmp_path):
 
 def test_transform_cleans_numeric_columns(etl, raw_sales_df):
     result = etl.transform(raw_sales_df)
-    assert result["Net Value(THB)"].iloc[0] == pytest.approx(100000.0)
+    assert result["Net_Value_THB"].iloc[0] == pytest.approx(100000.0)
+
+
+def test_transform_renames_net_value_to_canonical(etl, raw_sales_df):
+    result = etl.transform(raw_sales_df)
+    assert "Net_Value_THB" in result.columns
+    assert "Net Value(THB)" not in result.columns
+    assert result["Net_Value_THB"].iloc[0] == pytest.approx(100000.0)
 
 
 def test_output_path_uses_company_code(etl, tmp_path):

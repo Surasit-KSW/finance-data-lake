@@ -84,6 +84,10 @@ class SalesTransformETL(BaseSilverETL):
             if df[col].dtype == object:
                 df[col] = df[col].astype(str)
 
+        # Rename to canonical Silver schema name
+        if "Net Value(THB)" in df.columns:
+            df = df.rename(columns={"Net Value(THB)": "Net_Value_THB"})
+
         return df
 
     def _output_path(self) -> Path:
