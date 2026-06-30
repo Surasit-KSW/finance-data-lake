@@ -66,7 +66,14 @@ class SAPConnector:
                             break  # found one match for this month
             else:
                 # Read all .xlsx files in the year dir
-                for fpath in sorted(yr_path.glob("*.xlsx")) + sorted(yr_path.glob("*.XLSX")):
+                # Deduplicate by resolved path on case-insensitive filesystems (Windows)
+                seen_paths = set()
+                candidates = sorted(set(yr_path.glob("*.xlsx")) | set(yr_path.glob("*.XLSX")))
+                for fpath in candidates:
+                    resolved = fpath.resolve()
+                    if resolved in seen_paths:
+                        continue
+                    seen_paths.add(resolved)
                     df = self._read_excel(fpath)
                     if df is not None:
                         df["Source_File"] = fpath.name
@@ -125,7 +132,14 @@ class ExcelTemplateConnector:
         if not bronze_path.exists():
             return pd.DataFrame()
         frames = []
-        for fpath in sorted(list(bronze_path.glob("*.xlsx")) + list(bronze_path.glob("*.XLSX"))):
+        # Deduplicate by resolved path on case-insensitive filesystems (Windows)
+        seen_paths = set()
+        candidates = sorted(set(bronze_path.glob("*.xlsx")) | set(bronze_path.glob("*.XLSX")))
+        for fpath in candidates:
+            resolved = fpath.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
             try:
                 df = pd.read_excel(fpath, engine="openpyxl")
                 df["Source_File"] = fpath.name
