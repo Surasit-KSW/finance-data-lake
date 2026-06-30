@@ -76,8 +76,8 @@ def test_run_skips_when_no_bronze_files(etl):
     assert result["rows_in"] == 0
 
 
-def test_transform_renames_gl_account_to_canonical(tmp_path):
-    """transform() must rename G/L Account → GL_Account (canonical Silver schema name)"""
+def test_transform_preserves_gl_account_column_name(tmp_path):
+    """transform() must keep 'G/L Account' as-is — routers use this column name in SQL."""
     etl = GLTransformETL(company_code="1000", bronze_gl_path=tmp_path, silver_path=tmp_path, year=None)
     df = pd.DataFrame({
         "G/L Account": ["5411010", "5411020"],
@@ -86,5 +86,5 @@ def test_transform_renames_gl_account_to_canonical(tmp_path):
         "Posting Date": ["01.01.2025", "15.01.2025"],
     })
     result = etl.transform(df)
-    assert "GL_Account" in result.columns
-    assert "G/L Account" not in result.columns
+    assert "G/L Account" in result.columns
+    assert "GL_Account" not in result.columns

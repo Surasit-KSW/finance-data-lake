@@ -82,10 +82,6 @@ class GLTransformETL(BaseSilverETL):
         # Clean all numeric columns
         df = self.clean_numeric(df, ["AMOUNT", "AMT", "VALUE"])
 
-        # Rename to canonical Silver schema name
-        if "G/L Account" in df.columns:
-            df = df.rename(columns={"G/L Account": "GL_Account"})
-
         return df
 
     def _output_path(self) -> Path:

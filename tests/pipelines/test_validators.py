@@ -13,7 +13,7 @@ def _gl_df(**overrides):
         "company_code": ["1000"],
         "Year": [2025],
         "Month": [1],
-        "GL_Account": ["5411010"],
+        "G/L Account": ["5411010"],
         "Net_Amount": [1000.0],
     }
     data.update(overrides)
@@ -30,6 +30,14 @@ def test_missing_required_column_returns_warning(validator):
     df = df.drop(columns=["Net_Amount"])
     warnings = validator.validate(df, "gl")
     assert any("Net_Amount" in w for w in warnings)
+
+
+def test_gl_required_uses_gl_account_not_renamed(validator):
+    """Validator requires 'G/L Account' (router-compatible name), not 'GL_Account'."""
+    df = _gl_df()
+    df = df.rename(columns={"G/L Account": "GL_Account"})  # wrong name
+    warnings = validator.validate(df, "gl")
+    assert any("G/L Account" in w for w in warnings)
 
 
 def test_null_key_column_returns_warning(validator):

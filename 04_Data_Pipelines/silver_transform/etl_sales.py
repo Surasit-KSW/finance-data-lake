@@ -94,8 +94,9 @@ class SalesTransformETL(BaseSilverETL):
         return self.silver_path / f"master_sales_{self.company_code}.parquet"
 
     def _save(self, df: pd.DataFrame) -> None:
-        """Delete old per-year master_sales_YYYY.parquet files before saving."""
-        for old in self.silver_path.glob("master_sales_20??.parquet"):
+        """Delete old per-year master_sales_YYYY.parquet files before saving.
+        Pattern 20[12]? matches years 2010-2029 but NOT company codes (1000-6000)."""
+        for old in self.silver_path.glob("master_sales_20[12]?.parquet"):
             old.unlink()
             print(f"  Deleted old file: {old.name}")
         super()._save(df)

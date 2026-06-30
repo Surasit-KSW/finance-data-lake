@@ -6,7 +6,7 @@ import pandas as pd
 
 
 REQUIRED_COLUMNS = {
-    "gl":         ["company_code", "Year", "Month", "GL_Account", "Net_Amount"],
+    "gl":         ["company_code", "Year", "Month", "G/L Account", "Net_Amount"],
     "sales":      ["company_code", "Year", "Month", "Net_Value_THB"],
     "production": ["company_code", "Year", "Month", "Plant", "GR_Qty"],
     "ar":         ["company_code", "GL_Account", "Net_Amount"],
