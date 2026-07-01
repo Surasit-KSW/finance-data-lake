@@ -40,6 +40,19 @@ VIEWS = {
     "v_gl_summary":         os.path.join(GOLD, "Summary_GL_*.parquet"),
     "gold_revenue_monthly": os.path.join(GOLD, "gold_revenue_monthly.parquet"),
     "gold_gp_by_plant":     os.path.join(GOLD, "gold_gp_by_plant.parquet"),
+
+    # Silver — standalone ETL scripts (not in main orchestrator Silver phase)
+    "v_mb51": os.path.join(SILVER, "master_mb51_*.parquet"),
+    "v_prd":  os.path.join(SILVER, "master_prd_*.parquet"),
+    "v_tb":   os.path.join(SILVER, "master_tb_*.parquet"),
+    "v_ksb1": os.path.join(SILVER, "master_ksb1_*.parquet"),
+
+    # Gold — audit parquets (freshness depends on manual gold run or orchestrator --gold-only)
+    "gold_leadsheet":     os.path.join(GOLD, "gold_leadsheet.parquet"),
+    "gold_cashflow":      os.path.join(GOLD, "gold_cashflow.parquet"),
+    "gold_ppe":           os.path.join(GOLD, "gold_ppe.parquet"),
+    "gold_elimination":   os.path.join(GOLD, "gold_elimination.parquet"),
+    "gold_related_party": os.path.join(GOLD, "gold_related_party.parquet"),
 }
 
 # Single-year views removed — use v_gl WHERE Year = YYYY instead

@@ -64,7 +64,16 @@ BRONZE_PATH_KWARG = {
 }
 
 GOLD_SCRIPTS = {
-    "gl_summary": PIPELINES_DIR / "gold_aggregation" / "create_gold_summary.py",
+    # Group 1 — no inter-gold dependencies
+    "gl_summary":    PIPELINES_DIR / "gold_aggregation" / "create_gold_summary.py",
+    "revenue":       PIPELINES_DIR / "gold_aggregation" / "create_gold_revenue.py",
+    "gp_by_plant":   PIPELINES_DIR / "gold_aggregation" / "create_gold_gp.py",
+    "ppe_schedule":  PIPELINES_DIR / "gold_aggregation" / "create_ppe_schedule.py",
+    "elimination":   PIPELINES_DIR / "gold_aggregation" / "create_elimination.py",
+    "related_party": PIPELINES_DIR / "gold_aggregation" / "create_related_party.py",
+    # Group 2 — cashflow depends on gold_leadsheet.parquet, run AFTER leadsheet
+    "leadsheet":     PIPELINES_DIR / "gold_aggregation" / "create_leadsheet.py",
+    "cashflow":      PIPELINES_DIR / "gold_aggregation" / "create_cashflow.py",
 }
 
 INIT_DB_SCRIPT = PIPELINES_DIR / "init_duckdb.py"
@@ -225,6 +234,8 @@ def main():
     parser.add_argument("--company",      help="เฉพาะ company นี้ เช่น AMC, GA")
     parser.add_argument("--year",         type=int, help="เฉพาะปีนี้ เช่น 2026")
     parser.add_argument("--include-gold", action="store_true", help="รัน gold layer หลัง silver")
+    parser.add_argument("--gold-only",    action="store_true",
+                        help="รัน gold layer เท่านั้น ไม่รัน silver (ใช้หลัง silver ทันสมัยแล้ว)")
     parser.add_argument("--dashboard",    action="store_true", help="เปิด Streamlit dashboard")
     args = parser.parse_args()
 
@@ -242,6 +253,20 @@ def main():
     # ── Dashboard ──────────────────────────────────────────────
     if args.dashboard:
         subprocess.run(["streamlit", "run", str(DASHBOARD_SCRIPT)], cwd=str(PROJECT_ROOT))
+        return
+
+    # ── Gold Only ──────────────────────────────────────────────
+    if args.gold_only:
+        if any([args.company, args.domain, args.layer]):
+            print("  ℹ  --gold-only: ignoring --company / --domain / --layer (gold has no per-company split)")
+        print(f"\n[GOLD ONLY] รัน gold layer เท่านั้น")
+        for key, script in GOLD_SCRIPTS.items():
+            ok = run_script(script, label=f"[gold] {key}")
+            all_results.append((f"gold_{key}", ok))
+        ok = run_script(INIT_DB_SCRIPT, label="init-db")
+        all_results.append(("init-db", ok))
+        if all_results:
+            print_summary(all_results)
         return
 
     # ── Silver tasks ───────────────────────────────────────────

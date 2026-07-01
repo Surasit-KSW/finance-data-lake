@@ -26,10 +26,11 @@ def ar_aging(
     Source: v_ar (Silver layer or PostgreSQL table)
     """
     conditions = [
+        "company_code = ?",
         "EXTRACT(YEAR  FROM \"Invoice Date\")::int <= ?",
         "EXTRACT(MONTH FROM \"Invoice Date\")::int <= ?",
     ]
-    params: list = [as_of_year, as_of_month]
+    params: list = ["1000", as_of_year, as_of_month]
 
     if customer:
         conditions.append('"Customer Name" ILIKE ?')
@@ -70,12 +71,13 @@ def ar_summary(year: int = Query(2025)):
             SUM("Outstanding")  AS total_outstanding,
             COUNT(*)            AS invoice_count
         FROM v_ar
-        WHERE EXTRACT(YEAR FROM "Invoice Date")::int = ?
+        WHERE company_code = ?
+          AND EXTRACT(YEAR FROM "Invoice Date")::int = ?
         GROUP BY "Customer Name"
         ORDER BY total_outstanding DESC
         LIMIT 20
         """,
-        [year],
+        ["1000", year],
     )
     return {
         "status": "ok",
@@ -104,12 +106,13 @@ def gl_reconcile(
             )                        AS cumulative_balance,
             COUNT(*)                 AS transactions
         FROM v_gl
-        WHERE "G/L Account" = ?
+        WHERE company_code = ?
+          AND "G/L Account" = ?
           AND year = ?
         GROUP BY year, month
         ORDER BY year, month
         """,
-        [account, year],
+        ["1000", account, year],
     )
     return {
         "status":   "ok",
