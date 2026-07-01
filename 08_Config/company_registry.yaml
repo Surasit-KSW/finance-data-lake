@@ -1,46 +1,87 @@
 # company_registry.yaml — Source of truth for AMC Group company definitions
-# company_code: internal identifier (SAP code for SAP companies, sequential for non-SAP)
-# source_type: sap | excel_template
+# company_code: SAP code (1000-3000) or internal identifier (4000-6000 for non-SAP)
+# source_type:  sap | excel_template
 # bronze_paths: relative to PROJECT_ROOT, per domain
+#
+# Bronze path convention:
+#   01_Bronze_Raw/{domain}/{company}/{plant?}/{year}/
+#   e.g. 01_Bronze_Raw/gl/amc/2026/gl_2026_01.XLSX
 
 companies:
+
   AMC:
     company_code: "1000"
     source_type: sap
+    plants: ["1100", "1200", "1300"]
     bronze_paths:
-      gl: "01_Bronze_Raw/GL_Transactions"
-      sales: "01_Bronze_Raw/Sales_Reports"
-      production: "01_Bronze_Raw/Production"
-      ar: "01_Bronze_Raw/AR_Data"
+      gl:               "01_Bronze_Raw/gl/amc"                       # FBL3N — by year subfolder
+      sales:            "01_Bronze_Raw/sales/amc"                    # VF05  — by year subfolder
+      tb:               "01_Bronze_Raw/tb_snapshots/amc"             # F.01  — by year subfolder
+      warehouse_stock:  "01_Bronze_Raw/warehouse_stock/amc"          # MB52  — by year subfolder
+      production_orders:"01_Bronze_Raw/production_orders/amc"        # PRD   — by plant/year
+      cost_center:      "01_Bronze_Raw/cost_center/amc"              # KSB1  — by plant/year
+      material_docs:    "01_Bronze_Raw/material_docs/amc"            # MB51  — by plant/year
+      ar:               "01_Bronze_Raw/ar/amc"                       # FBL5N
+      ap:               "01_Bronze_Raw/ap/amc"                       # AP + deposits
+      inventory:        "01_Bronze_Raw/inventory/amc"                # Roll stock + NRV
+      payroll:          "01_Bronze_Raw/payroll/amc"                  # Payroll reports + mapping
+      month_end:        "01_Bronze_Raw/month_end/amc"                # CO closing (KSU5, CPTD, etc.)
+      fixed_assets:     "01_Bronze_Raw/fixed_assets/amc"             # PPE
 
   GA:
     company_code: "2000"
     source_type: sap
+    plants: ["2200"]
     bronze_paths:
-      gl: "01_Bronze_Raw/GA/GL_Transactions"
-      sales: "01_Bronze_Raw/GA/Sales_Reports"
+      gl:               "01_Bronze_Raw/gl/ga"                        # FBL3N
+      sales:            "01_Bronze_Raw/sales/ga"                     # VF05
+      tb:               "01_Bronze_Raw/tb_snapshots/ga"              # F.01
+      production_orders:"01_Bronze_Raw/production_orders/ga"         # PRD
+      cost_center:      "01_Bronze_Raw/cost_center/ga"               # KSB1
+      material_docs:    "01_Bronze_Raw/material_docs/ga"             # MB51
+      inventory:        "01_Bronze_Raw/inventory/ga"                 # Roll stock
 
   STC:
     company_code: "3000"
     source_type: sap
+    plants: []
     bronze_paths:
-      gl: "01_Bronze_Raw/STC/GL_Transactions"
+      gl:               "01_Bronze_Raw/gl/stc"
+      sales:            "01_Bronze_Raw/sales/stc"
+      tb:               "01_Bronze_Raw/tb_snapshots/stc"
+      ar:               "01_Bronze_Raw/ar/stc"
 
   AMCE:
     company_code: "4000"
     source_type: excel_template
+    plants: []
+    note: "Non-SAP — manual Excel GL entries; company codes 4000-6000 are internal, not SAP codes"
     bronze_paths:
-      gl: "01_Bronze_Raw/AMCE/manual"
-    note: "company codes 4000-6000 are internal identifiers, not SAP codes"
+      gl:               "01_Bronze_Raw/gl/amce/manual"
 
   AMSB:
     company_code: "5000"
     source_type: excel_template
+    plants: []
+    note: "Non-SAP — manual Excel GL entries"
     bronze_paths:
-      gl: "01_Bronze_Raw/AMSB/manual"
+      gl:               "01_Bronze_Raw/gl/amsb/manual"
 
   PSM:
     company_code: "6000"
     source_type: excel_template
+    plants: []
+    note: "Non-SAP — manual Excel GL entries"
     bronze_paths:
-      gl: "01_Bronze_Raw/PSM/manual"
+      gl:               "01_Bronze_Raw/gl/psm/manual"
+
+# ---------------------------------------------------------------------------
+# Shared across all companies
+# ---------------------------------------------------------------------------
+shared:
+  master_data:
+    coa:          "01_Bronze_Raw/master_data/coa"          # COA_AMC.XLSX
+    material:     "01_Bronze_Raw/master_data/material"     # MARA monthly snapshots
+    cost_center:  "01_Bronze_Raw/master_data/cost_center"  # Cost center master
+
+  templates:      "01_Bronze_Raw/templates"                # Audit + leadsheet templates
