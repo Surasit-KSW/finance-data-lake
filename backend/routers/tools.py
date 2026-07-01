@@ -43,8 +43,8 @@ def get_tools_status():
     bronze = {
         "sales_2026": _scan_bronze_months(
             "sales/amc/2026/vf05_2026{mm}.xlsx", months_2026),
-        "production_2026": _scan_bronze_months(
-            "warehouse_stock/amc/2026/mb52_1100_2026{mm}.xlsx", months_2026),
+        "zcor001_2026": _scan_bronze_months(
+            "zcor001/amc/2026/zcor001_1100_2026{mm}.xlsx", months_2026),
         "prd_1100": _scan_bronze_months(
             "production_orders/amc/1100/2026/prd_2026{mm}.xlsx", months_2026),
         "prd_1200": _scan_bronze_months(

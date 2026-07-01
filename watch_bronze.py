@@ -37,7 +37,7 @@ FOLDER_TO_DOMAIN = {
     "gl":                  "gl",
     "ar":                  "ar",
     "sales":               "sales",
-    "warehouse_stock":     "production",
+    "zcor001":             "production",
     "production_orders":   "production",
     "material_docs":       "production",
     "cost_center":         "gl",       # KSB1 cost center → ใช้ gl ETL

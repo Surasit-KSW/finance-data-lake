@@ -36,7 +36,7 @@ bronze:
   gl:               "01_Bronze_Raw/gl"               # FBL3N  gl/{company}/{year}/
   sales:            "01_Bronze_Raw/sales"             # VF05   sales/{company}/{year}/
   tb_snapshots:     "01_Bronze_Raw/tb_snapshots"      # F.01   tb_snapshots/{company}/{year}/
-  warehouse_stock:  "01_Bronze_Raw/warehouse_stock"   # MB52   warehouse_stock/{company}/{year}/
+  zcor001:          "01_Bronze_Raw/zcor001"           # ZCOR001 production report  zcor001/{company}/{year}/
   production_orders:"01_Bronze_Raw/production_orders" # PRD    production_orders/{company}/{plant}/{year}/
   cost_center:      "01_Bronze_Raw/cost_center"       # KSB1   cost_center/{company}/{plant}/{year}/
   material_docs:    "01_Bronze_Raw/material_docs"     # MB51   material_docs/{company}/{plant}/{year}/

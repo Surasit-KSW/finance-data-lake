@@ -17,7 +17,7 @@ companies:
       gl:               "01_Bronze_Raw/gl/amc"                       # FBL3N — by year subfolder
       sales:            "01_Bronze_Raw/sales/amc"                    # VF05  — by year subfolder
       tb:               "01_Bronze_Raw/tb_snapshots/amc"             # F.01  — by year subfolder
-      warehouse_stock:  "01_Bronze_Raw/warehouse_stock/amc"          # MB52  — by year subfolder
+      zcor001:          "01_Bronze_Raw/zcor001/amc"                  # ZCOR001 production report — by year subfolder
       production_orders:"01_Bronze_Raw/production_orders/amc"        # PRD   — by plant/year
       cost_center:      "01_Bronze_Raw/cost_center/amc"              # KSB1  — by plant/year
       material_docs:    "01_Bronze_Raw/material_docs/amc"            # MB51  — by plant/year
