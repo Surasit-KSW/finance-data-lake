@@ -1,7 +1,7 @@
 """
-etl_prd.py — Bronze PRD_GI → Silver: Production Order Detail
+etl_prd.py — Bronze production_orders → Silver: Production Order Detail
 
-อ่านไฟล์ PRD_{plant}_{MM}.{YYYY}.XLSX จาก 01_Bronze_Raw/PRD_GI/
+อ่านไฟล์ prd_{YYYYMM}.xlsx จาก 01_Bronze_Raw/production_orders/amc/{plant}/{year}/
 Output: 02_Silver_Cleaned/master_prd_{year}.parquet
 
 โครงสร้างผลลัพธ์ per production order:
@@ -33,7 +33,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-BRONZE       = os.path.join(PROJECT_ROOT, '01_Bronze_Raw', 'PRD_GI')
+BRONZE       = os.path.join(PROJECT_ROOT, '01_Bronze_Raw', 'production_orders', 'amc')
 SILVER       = os.path.join(PROJECT_ROOT, '02_Silver_Cleaned')
 
 # ─── Process mapping ─────────────────────────────────────────────────────────
@@ -69,14 +69,15 @@ def _to_float(series: pd.Series) -> pd.Series:
 # ─── Parse one file ───────────────────────────────────────────────────────────
 def _parse_file(path: str) -> pd.DataFrame | None:
     fname = os.path.basename(path)
-    m = re.match(r'PRD_(\d{4})_(\d{2})\.(\d{4})\.XLSX', fname, re.IGNORECASE)
+    m = re.match(r'prd_(\d{4})(\d{2})\.xlsx', fname, re.IGNORECASE)
     if not m:
         print(f'  ⏭️  skip (filename mismatch): {fname}')
         return None
 
-    plant = m.group(1)
+    year  = int(m.group(1))
     month = int(m.group(2))
-    year  = int(m.group(3))
+    # Plant is derived from parent directory name (e.g. production_orders/amc/1100/2026/)
+    plant = os.path.basename(os.path.dirname(os.path.dirname(path)))
 
     df = pd.read_excel(path, dtype=str)
     if df.empty:
@@ -154,9 +155,12 @@ def _parse_file(path: str) -> pd.DataFrame | None:
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def run(target_year: int | None = None):
-    files = sorted(glob.glob(os.path.join(BRONZE, 'PRD_*.XLSX')))
+    # New structure: production_orders/amc/{plant}/{year}/prd_{YYYYMM}.xlsx
+    files = sorted(glob.glob(os.path.join(BRONZE, '**', 'prd_*.xlsx'), recursive=True))
     if not files:
-        print(f'❌ ไม่พบไฟล์ PRD_*.XLSX ใน {BRONZE}')
+        files = sorted(glob.glob(os.path.join(BRONZE, '**', 'prd_*.XLSX'), recursive=True))
+    if not files:
+        print(f'❌ ไม่พบไฟล์ prd_*.xlsx ใน {BRONZE}')
         sys.exit(1)
 
     print(f'📂 พบ {len(files)} ไฟล์ใน {BRONZE}')
@@ -164,11 +168,11 @@ def run(target_year: int | None = None):
     # group by year
     by_year: dict[int, list[pd.DataFrame]] = {}
     for f in files:
-        m = re.match(r'PRD_(\d{4})_(\d{2})\.(\d{4})\.XLSX',
+        m = re.match(r'prd_(\d{4})(\d{2})\.xlsx',
                      os.path.basename(f), re.IGNORECASE)
         if not m:
             continue
-        yr = int(m.group(3))
+        yr = int(m.group(1))
         if target_year and yr != target_year:
             continue
         df = _parse_file(f)

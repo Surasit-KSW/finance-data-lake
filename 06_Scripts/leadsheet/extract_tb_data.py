@@ -2,8 +2,8 @@
 extract_tb_data.py
 ==================
 Extracts Trial Balance data from two sources:
-  1. Dec 2025 (YE2025) — from AMC Leadsheet YE25.xlsx detail schedules
-  2. Mar 2026 (Q1 2026) — from AMC_TB_03.2026_v9.XLSX (SAP export)
+  1. Dec 2025 (YE2025) — from leadsheet_ye_2025.xlsx detail schedules
+  2. Mar 2026 (Q1 2026) — from tb_nrv_202603_v9.xlsx (SAP export)
 
 Outputs:
   - tb_dec2025.csv  — Account Code, Account Name, Balance (Dec 2025)
@@ -19,13 +19,13 @@ from pathlib import Path
 
 # --- Paths ------------------------------------------------------------------
 BASE_DIR  = Path(__file__).parent.parent.parent  # _Finance_Data_Lake root
-TEMPLATES = BASE_DIR / "01_Bronze_Raw" / "Templates"
-NRV_DIR   = BASE_DIR / "01_Bronze_Raw" / "Inventory_RollStock" / "NRV"
+TEMPLATES = BASE_DIR / "01_Bronze_Raw" / "templates"
+NRV_DIR   = BASE_DIR / "01_Bronze_Raw" / "inventory" / "amc"
 OUTPUT    = BASE_DIR / "06_Scripts" / "leadsheet" / "output"
 OUTPUT.mkdir(exist_ok=True)
 
-YE25_FILE   = TEMPLATES / "AMC Leadsheet YE25.xlsx"
-TB_MAR26    = NRV_DIR   / "AMC_TB_03.2026_v9.XLSX"
+YE25_FILE   = TEMPLATES / "leadsheet_ye_2025.xlsx"
+TB_MAR26    = NRV_DIR   / "tb_nrv_202603_v9.xlsx"
 
 
 # --- Extract Dec 2025 from YE25 detail schedules ----------------------------
@@ -83,7 +83,7 @@ def extract_dec2025() -> pd.DataFrame:
 # --- Extract Mar 2026 from SAP TB export ------------------------------------
 def extract_mar2026() -> pd.DataFrame:
     """
-    AMC_TB_03.2026_v9.XLSX columns:
+    tb_nrv_202603_v9.xlsx columns:
       Col A (0): Financial Statement Item (FS type code)
       Col B (1): Text for B/S P&L Item (Account Name)
       Col C (2): Account Number
@@ -91,7 +91,7 @@ def extract_mar2026() -> pd.DataFrame:
 
     Row 1: headers; Row 2+: data (skip rows without account number)
     """
-    print("Extracting Mar 2026 balances from AMC_TB_03.2026…")
+    print("Extracting Mar 2026 balances from tb_nrv_202603_v9.xlsx…")
     wb = openpyxl.load_workbook(TB_MAR26, read_only=True, data_only=True)
     ws = wb["Sheet1"]
 

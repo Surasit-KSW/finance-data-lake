@@ -32,8 +32,8 @@ import openpyxl
 from pathlib import Path
 
 BASE_DIR    = Path(__file__).parent.parent.parent
-TEMPLATES   = BASE_DIR / "01_Bronze_Raw" / "Templates"
-TARGET_FILE = TEMPLATES / "AMC_Q12026_Leadsheet STAT to client.xlsx"
+TEMPLATES   = BASE_DIR / "01_Bronze_Raw" / "templates"
+TARGET_FILE = TEMPLATES / "leadsheet_q1_2026_stat.xlsx"
 
 # Sheets to skip (TB sheets are data-only; SAM sheets use different formulas)
 SKIP_SHEETS = {

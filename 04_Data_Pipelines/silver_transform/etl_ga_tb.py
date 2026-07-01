@@ -3,7 +3,7 @@ etl_ga_tb.py
 ============
 ETL: GA Trial Balance (TB) Excel → Silver parquet
 
-Input  : 01_Bronze_Raw/TB_Snapshots/GA/GA_TB_{MM}.{YYYY}.XLSX
+Input  : 01_Bronze_Raw/tb_snapshots/ga/{YYYY}/tb_{YYYYMM}.xlsx
 Output : 02_Silver_Cleaned/ga_tb_{year}.parquet
 
 Columns in output parquet:
@@ -52,7 +52,7 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 
 LAKE_ROOT = Path(__file__).resolve().parents[2]
-TB_DIR    = LAKE_ROOT / "01_Bronze_Raw" / "TB_Snapshots" / "GA"
+TB_DIR    = LAKE_ROOT / "01_Bronze_Raw" / "tb_snapshots" / "ga"
 SILVER    = LAKE_ROOT / "02_Silver_Cleaned"
 
 # Month → posting-period number mapping from filename
@@ -88,10 +88,11 @@ def _get(df: pd.DataFrame, account: str) -> float:
 
 def _process_month(year: int, mm: str) -> dict | None:
     """Load one month's TB → return a dict of KPIs, or None if file missing."""
-    # Try filename patterns: GA_TB_01.2026.XLSX
-    path = TB_DIR / f"GA_TB_{mm}.{year}.XLSX"
+    # New filename pattern: tb_{YYYYMM}.xlsx in tb_snapshots/ga/{year}/
+    year_dir = TB_DIR / str(year)
+    path = year_dir / f"tb_{year}{mm}.xlsx"
     if not path.exists():
-        path = TB_DIR / f"GA_TB_{mm}.{year}.xlsx"
+        path = year_dir / f"tb_{year}{mm}.XLSX"
     if not path.exists():
         return None
 

@@ -1,6 +1,6 @@
 """
 etl_ksb1.py — KSB1 Cost Center Line Items Silver ETL
-Reads: 01_Bronze_Raw/PRD_GI/KSB1_{1100|1200|1300}_MM.YYYY.XLSX
+Reads: 01_Bronze_Raw/cost_center/amc/{plant}/{year}/ksb1_{YYYYMM}.xlsx
 Writes: 02_Silver_Cleaned/master_ksb1_1000.parquet
 
 Usage:
@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BRONZE_PATH = PROJECT_ROOT / "01_Bronze_Raw" / "PRD_GI"
+BRONZE_PATH = PROJECT_ROOT / "01_Bronze_Raw" / "cost_center" / "amc"
 SILVER_PATH = PROJECT_ROOT / "02_Silver_Cleaned"
 COMPANY_CODE = "1000"
 OUTPUT_FILE = SILVER_PATH / f"master_ksb1_{COMPANY_CODE}.parquet"
@@ -27,12 +27,14 @@ OUTPUT_FILE = SILVER_PATH / f"master_ksb1_{COMPANY_CODE}.parquet"
 VALID_PLANTS = {"1100", "1200", "1300"}
 
 
-def parse_filename(fname: str):
-    """Parse 'KSB1_1300_01.2026.XLSX' → (plant, month, year) or None."""
-    m = re.match(r"KSB1_(\d{4})_(\d{2})\.(\d{4})\.XLSX", fname, re.IGNORECASE)
+def parse_filename(fname: str, parent_dir: str = None):
+    """Parse 'ksb1_{YYYYMM}.xlsx' → (plant, month, year) or None.
+    Plant is derived from the parent directory name."""
+    m = re.match(r"ksb1_(\d{4})(\d{2})\.xlsx", fname, re.IGNORECASE)
     if not m:
         return None
-    plant, month, year = m.group(1), int(m.group(2)), int(m.group(3))
+    year, month = int(m.group(1)), int(m.group(2))
+    plant = str(parent_dir) if parent_dir else ""
     if plant not in VALID_PLANTS:
         return None
     return plant, month, year
@@ -102,16 +104,23 @@ def run(year_filter: int = None):
     print(f"{'='*55}")
 
     all_frames = []
-    files = sorted(BRONZE_PATH.glob("KSB1_*.XLSX"))
+    # New structure: cost_center/amc/{plant}/{year}/ksb1_{YYYYMM}.xlsx
+    files = sorted(BRONZE_PATH.rglob("ksb1_*.xlsx"))
     if not files:
-        files = sorted(BRONZE_PATH.glob("KSB1_*.xlsx"))
+        files = sorted(BRONZE_PATH.rglob("ksb1_*.XLSX"))
 
     if not files:
         print(f"  ⚠️  No KSB1 files found in: {BRONZE_PATH}")
         return
 
     for fpath in files:
-        parsed = parse_filename(fpath.name)
+        # Plant is the first subdirectory under BRONZE_PATH (e.g. 1100, 1200, 1300)
+        try:
+            rel = fpath.relative_to(BRONZE_PATH)
+            plant_dir = rel.parts[0]
+        except (ValueError, IndexError):
+            plant_dir = ""
+        parsed = parse_filename(fpath.name, parent_dir=plant_dir)
         if not parsed:
             print(f"  ⏭  {fpath.name} — skipped (not a per-plant file)")
             continue

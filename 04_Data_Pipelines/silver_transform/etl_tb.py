@@ -1,6 +1,6 @@
 """
 etl_tb.py — Trial Balance Silver ETL
-Reads: 01_Bronze_Raw/PRD_GI/AMC_TB_MM.YYYY.XLSX  (5 files per year so far)
+Reads: 01_Bronze_Raw/tb_snapshots/amc/{year}/tb_{YYYYMM}.xlsx
 Writes: 02_Silver_Cleaned/master_tb_1000.parquet
 
 Usage:
@@ -18,18 +18,18 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BRONZE_PATH = PROJECT_ROOT / "01_Bronze_Raw" / "PRD_GI"
+BRONZE_PATH = PROJECT_ROOT / "01_Bronze_Raw" / "tb_snapshots" / "amc"
 SILVER_PATH = PROJECT_ROOT / "02_Silver_Cleaned"
 COMPANY_CODE = "1000"
 OUTPUT_FILE = SILVER_PATH / f"master_tb_{COMPANY_CODE}.parquet"
 
 
 def parse_filename(fname: str):
-    """Parse 'AMC_TB_MM.YYYY.XLSX' -> (month: int, year: int) or None."""
-    m = re.match(r"AMC_TB_(\d{2})\.(\d{4})\.XLSX", fname, re.IGNORECASE)
+    """Parse 'tb_{YYYYMM}.xlsx' -> (month: int, year: int) or None."""
+    m = re.match(r"tb_(\d{4})(\d{2})\.xlsx", fname, re.IGNORECASE)
     if not m:
         return None
-    return int(m.group(1)), int(m.group(2))
+    return int(m.group(2)), int(m.group(1))
 
 
 def read_tb_file(fpath: Path, month: int, year: int) -> pd.DataFrame:
@@ -86,10 +86,10 @@ def run(year_filter: int = None):
     print(f"{'='*55}")
 
     all_frames = []
-    files = sorted(BRONZE_PATH.glob("AMC_TB_*.XLSX"))
+    # New structure: tb_snapshots/amc/{year}/tb_{YYYYMM}.xlsx
+    files = sorted(BRONZE_PATH.rglob("tb_*.xlsx"))
     if not files:
-        # Try lowercase extension
-        files = sorted(BRONZE_PATH.glob("AMC_TB_*.xlsx"))
+        files = sorted(BRONZE_PATH.rglob("tb_*.XLSX"))
 
     if not files:
         print(f"  WARNING: No TB files found in: {BRONZE_PATH}")

@@ -3,7 +3,7 @@ build_q1_2026_leadsheet.py
 ==========================
 Builds the AMC Q1'2026 Leadsheet (STAT to client) in Excel format.
 
-Starting point : AMC_Q2_2026_Leadsheet STAT to client.xlsx
+Starting point : leadsheet_q2_2026_stat.xlsx
                  (already contains TB Mar 26 + Master TB with Mar 2026 balances)
 
 What this script adds:
@@ -13,7 +13,7 @@ What this script adds:
   4. Renames the file correctly to Q1'2026
 
 Output:
-  01_Bronze_Raw/Templates/AMC_Q12026_Leadsheet STAT to client.xlsx
+  01_Bronze_Raw/templates/leadsheet_q1_2026_stat.xlsx
 
 Usage:
     python build_q1_2026_leadsheet.py
@@ -29,12 +29,12 @@ import shutil
 
 # --- Paths ------------------------------------------------------------------
 BASE_DIR  = Path(__file__).parent.parent.parent   # _Finance_Data_Lake root
-TEMPLATES = BASE_DIR / "01_Bronze_Raw" / "Templates"
+TEMPLATES = BASE_DIR / "01_Bronze_Raw" / "templates"
 SCRIPTS   = BASE_DIR / "06_Scripts" / "leadsheet"
 OUTPUT    = SCRIPTS / "output"
 
-SOURCE_FILE  = TEMPLATES / "AMC_Q12025_Leadsheet STAT to client.xlsx"
-OUTPUT_FILE  = TEMPLATES / "AMC_Q12026_Leadsheet STAT to client.xlsx"
+SOURCE_FILE  = TEMPLATES / "leadsheet_q1_2025_stat.xlsx"
+OUTPUT_FILE  = TEMPLATES / "leadsheet_q1_2026_stat.xlsx"
 DEC25_CSV    = OUTPUT / "tb_dec2025.csv"
 MAR26_CSV    = OUTPUT / "tb_mar2026.csv"
 

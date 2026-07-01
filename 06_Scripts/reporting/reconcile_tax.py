@@ -11,7 +11,7 @@ print("⏳ กำลังโหลดข้อมูล SAP FBL3N (Excel)...")
 # 1. โหลดข้อมูลและเตรียมคอลัมน์
 # ==========================================
 try:
-    df = pd.read_excel('./01_Bronze_Raw/GL_Transactions/sap_fbl3n.XLSX', dtype=str, engine='openpyxl')
+    df = pd.read_excel('./01_Bronze_Raw/gl/amc/gl_legacy.xlsx', dtype=str, engine='openpyxl')
     
     df['CCode Curr Value'] = pd.to_numeric(df['CCode Curr Value'], errors='coerce').fillna(0)
     df['Posting Date'] = pd.to_datetime(df['Posting Date'], errors='coerce')

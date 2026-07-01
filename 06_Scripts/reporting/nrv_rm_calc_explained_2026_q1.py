@@ -30,8 +30,8 @@ from openpyxl.utils import get_column_letter
 # 0. Config
 # ─────────────────────────────────────────────
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PATH_NRV  = os.path.join(BASE_DIR, "01_Bronze_Raw", "Inventory_RollStock", "NRV",
-                         "NRV_SKU_Analysis_2026_Q1_v2.xlsx")
+PATH_NRV  = os.path.join(BASE_DIR, "01_Bronze_Raw", "inventory", "amc",
+                         "nrv_sku_202603.xlsx")
 PATH_PRD  = os.path.join(BASE_DIR, "04_Reports", "AMC_PRD_Q1'2026.XLSX")
 OUTPUT    = os.path.join(BASE_DIR, "04_Reports", "NRV_RM_Calc_Explained_2026_Q1.xlsx")
 REPORT_DATE = date.today().strftime("%d %B %Y")

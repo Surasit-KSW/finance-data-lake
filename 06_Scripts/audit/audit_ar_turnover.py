@@ -8,7 +8,7 @@ pd.set_option('display.float_format', '{:,.2f}'.format)
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 _SILVER = os.path.join(_PROJECT_ROOT, "02_Silver_Cleaned")
-_BRONZE_AR = os.path.join(_PROJECT_ROOT, "01_Bronze_Raw", "AR_Data")
+_BRONZE_AR = os.path.join(_PROJECT_ROOT, "01_Bronze_Raw", "ar", "amc")
 
 print("⏳ กำลังโหลดและประมวลผลข้อมูล Sales และ AR เพื่อวิเคราะห์ AR Turnover...")
 
@@ -36,8 +36,8 @@ ar_path = _BRONZE_AR
 try:
     print("   👉 กำลังอ่านไฟล์ลูกหนี้ (Excel) อาจใช้เวลาสักครู่...")
     # 🌟 เปลี่ยนเป็น read_excel และระบุชื่อไฟล์ .xlsx
-    df_ar_24 = pd.read_excel(os.path.join(ar_path, 'AR_2024.XLSX'), engine='openpyxl')
-    df_ar_25 = pd.read_excel(os.path.join(ar_path, 'AR_2025.XLSX'), engine='openpyxl')
+    df_ar_24 = pd.read_excel(os.path.join(ar_path, 'ar_2024.xlsx'), engine='openpyxl')
+    df_ar_25 = pd.read_excel(os.path.join(ar_path, 'ar_2025.xlsx'), engine='openpyxl')
     
     df_ar_24['Year_AR'] = 2024
     df_ar_25['Year_AR'] = 2025

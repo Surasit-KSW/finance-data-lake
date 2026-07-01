@@ -5,7 +5,7 @@ Assumption: RM (HR/GI coil) → FG (Pipe HR / Pipe GI)
 NRV(RM) = NRV(FG) weighted by Q1 production volume − Conversion Cost/KG
 
 Inputs
-  01_Bronze_Raw/Inventory_RollStock/NRV/NRV_SKU_Analysis_2026_Q1.xlsx
+  01_Bronze_Raw/inventory/amc/nrv_sku_202603.xlsx
   04_Reports/AMC_PRD_Q1'2026.XLSX  (Sheet1)
 
 Output
@@ -23,8 +23,8 @@ warnings.filterwarnings("ignore")
 
 # ── paths ───────────────────────────────────────────────────────────────────
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-NRV_FILE = os.path.join(BASE, "01_Bronze_Raw", "Inventory_RollStock", "NRV",
-                        "NRV_SKU_Analysis_2026_Q1.xlsx")
+NRV_FILE = os.path.join(BASE, "01_Bronze_Raw", "inventory", "amc",
+                        "nrv_sku_202603.xlsx")
 PRD_FILE = os.path.join(BASE, "04_Reports", "AMC_PRD_Q1'2026.XLSX")
 OUTPUT   = os.path.join(BASE, "04_Reports", "NRV_RM_Pipe_Analysis_2026_Q1.xlsx")
 

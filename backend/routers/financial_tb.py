@@ -22,8 +22,8 @@ from backend.services.db_service import query_df
 router = APIRouter(prefix="/api/v1/financial", tags=["Financial v1"])
 
 BRONZE = settings.BRONZE
-TEMPLATES = BRONZE / "Templates"
-NRV_DIR   = BRONZE / "Inventory_RollStock" / "NRV"
+TEMPLATES = BRONZE / "templates"
+NRV_DIR   = BRONZE / "inventory" / "amc"
 
 
 def _latest(directory: Path, pattern: str) -> Path | None:
@@ -34,8 +34,8 @@ def _latest(directory: Path, pattern: str) -> Path | None:
 
 # TB files keyed by period — versioned filenames resolved via glob at startup
 TB_FILES: dict[str, Path | None] = {
-    "2026-03-31": _latest(NRV_DIR, "AMC_TB_03.2026_v*.XLSX"),
-    "2025-12-31": TEMPLATES / "AMC Leadsheet YE25.xlsx",
+    "2026-03-31": _latest(NRV_DIR, "tb_nrv_202603_v*.xlsx"),
+    "2025-12-31": TEMPLATES / "leadsheet_ye_2025.xlsx",
 }
 
 LEADSHEET_SCRIPT = settings.PROJECT_ROOT / "06_Scripts" / "leadsheet" / "build_q1_2026_leadsheet.py"
@@ -190,10 +190,10 @@ def get_master_tb():
     Returns: account_code, account_name, index (schedule ref), caption
     Reads from Q1 2026 leadsheet Master TB sheet.
     """
-    q126 = TEMPLATES / "AMC_Q12026_Leadsheet STAT to client_.xlsx"
+    q126 = TEMPLATES / "leadsheet_q1_2026_stat.xlsx"
     if not q126.exists():
         # fallback to Q1 2025
-        q126 = TEMPLATES / "AMC_Q12025_Leadsheet STAT to client.xlsx"
+        q126 = TEMPLATES / "leadsheet_q1_2025_stat.xlsx"
     if not q126.exists():
         raise HTTPException(status_code=503, detail="Master TB file not found")
 

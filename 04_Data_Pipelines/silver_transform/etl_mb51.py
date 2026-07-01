@@ -1,9 +1,8 @@
 """
 etl_mb51.py — Bronze MB51 → Silver: Material Document (GI for Order)
 
-อ่านไฟล์ 2 ชุด:
-  1. MB51_all plant_{MM}.{YYYY}.XLSX  — movement 261 (GI for order, RM/semi-FG)
-  2. MB51_ingot_{MM}.{YYYY}.XLSX      — movement Z61 (GI for order, Zinc/GI ingots)
+อ่านไฟล์:
+  1. material_docs/amc/all/{year}/mb51_all_{YYYYMM}.xlsx  — movement 261 (GI for order, RM/semi-FG)
 Output: 02_Silver_Cleaned/master_mb51_{year}.parquet
 
 โครงสร้างผลลัพธ์ per order:
@@ -41,7 +40,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-BRONZE       = os.path.join(PROJECT_ROOT, '01_Bronze_Raw', 'PRD_GI')
+BRONZE       = os.path.join(PROJECT_ROOT, '01_Bronze_Raw', 'material_docs', 'amc')
 SILVER       = os.path.join(PROJECT_ROOT, '02_Silver_Cleaned')
 
 # ─── Input type classifier ────────────────────────────────────────────────────
@@ -67,13 +66,13 @@ def _classify_input(mat: str) -> str:
 # ─── Parse one MB51 file ──────────────────────────────────────────────────────
 def _parse_file(path: str, mvt_filter: str = '261') -> pd.DataFrame | None:
     fname = os.path.basename(path)
-    m = re.match(r'MB51_.*?_(\d{2})\.(\d{4})\.XLSX', fname, re.IGNORECASE)
+    m = re.match(r'mb51_all_(\d{4})(\d{2})\.xlsx', fname, re.IGNORECASE)
     if not m:
         print(f'  ⏭️  skip (filename mismatch): {fname}')
         return None
 
-    month = int(m.group(1))
-    year  = int(m.group(2))
+    year  = int(m.group(1))
+    month = int(m.group(2))
 
     df = pd.read_excel(path, dtype=str)
     df.columns = df.columns.str.strip()
@@ -174,29 +173,26 @@ def _aggregate_to_order(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def run(target_year: int | None = None):
-    # --- (1) MB51_all plant (movement 261) ---
-    all_plant_files = sorted(glob.glob(os.path.join(BRONZE, 'MB51_all plant_*.XLSX')))
-    # --- (2) MB51_ingot (movement Z61) ---
-    ingot_files     = sorted(glob.glob(os.path.join(BRONZE, 'MB51_ingot_*.XLSX')))
+    # New structure: material_docs/amc/all/{year}/mb51_all_{YYYYMM}.xlsx
+    all_plant_files = sorted(glob.glob(os.path.join(BRONZE, 'all', '**', 'mb51_all_*.xlsx'), recursive=True))
+    if not all_plant_files:
+        all_plant_files = sorted(glob.glob(os.path.join(BRONZE, 'all', '**', 'mb51_all_*.XLSX'), recursive=True))
 
-    if not all_plant_files and not ingot_files:
-        print(f'❌ ไม่พบไฟล์ MB51_*.XLSX ใน {BRONZE}')
+    if not all_plant_files:
+        print(f'❌ ไม่พบไฟล์ mb51_all_*.xlsx ใน {BRONZE}/all/')
         sys.exit(1)
 
-    print(f'📂 MB51_all plant: {len(all_plant_files)} ไฟล์ | MB51_ingot: {len(ingot_files)} ไฟล์')
+    print(f'📂 MB51_all: {len(all_plant_files)} ไฟล์')
 
-    file_specs = (
-        [(f, '261') for f in all_plant_files] +
-        [(f, 'Z61') for f in ingot_files]
-    )
+    file_specs = [(f, '261') for f in all_plant_files]
 
     by_year: dict[int, list[pd.DataFrame]] = {}
     for path, mvt in file_specs:
         fname = os.path.basename(path)
-        m = re.match(r'MB51_.*?_(\d{2})\.(\d{4})\.XLSX', fname, re.IGNORECASE)
+        m = re.match(r'mb51_all_(\d{4})(\d{2})\.xlsx', fname, re.IGNORECASE)
         if not m:
             continue
-        yr = int(m.group(2))
+        yr = int(m.group(1))
         if target_year and yr != target_year:
             continue
         df = _parse_file(path, mvt_filter=mvt)

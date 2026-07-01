@@ -41,7 +41,8 @@ def get_rm_type(mat_group):
 
 
 # ── 1. โหลด Stock ─────────────────────────────────────────────────────────────
-STOCK_FILE = "6.3 AMC_ยอดคงเหลือของสินค้าคงเหลือ จัดประเภทโดยสินค้า ณ  31.03.2026.xlsx"
+_BASE_DIR  = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+STOCK_FILE = os.path.join(_BASE_DIR, "01_Bronze_Raw", "inventory", "amc", "mb52_nrv_audit_202603.xlsx")
 
 stock_raw = pd.read_excel(STOCK_FILE, sheet_name="Ending InventoryYE'26", header=0)
 stock_raw.columns = stock_raw.iloc[0]
@@ -98,16 +99,19 @@ print(gd.to_string(index=False))
 
 
 # ── 2. โหลด Sale M1–M4 ───────────────────────────────────────────────────────
-SALE_FILES = {1:"sale_01.2026.XLSX", 2:"sale_02.2026.XLSX",
-              3:"sale_03.2026.XLSX", 4:"sale_04.2026.XLSX"}
+_SALES_DIR = os.path.join(_BASE_DIR, "01_Bronze_Raw", "sales", "amc", "2026")
+SALE_FILES = {1: os.path.join(_SALES_DIR, "vf05_202601.xlsx"),
+              2: os.path.join(_SALES_DIR, "vf05_202602.xlsx"),
+              3: os.path.join(_SALES_DIR, "vf05_202603.xlsx"),
+              4: os.path.join(_SALES_DIR, "vf05_202604.xlsx")}
 
 all_sales = []
-for month, fname in SALE_FILES.items():
-    df = pd.read_excel(fname, sheet_name="Sheet1")
+for month, fpath in SALE_FILES.items():
+    df = pd.read_excel(fpath, sheet_name="Sheet1")
     df = df[df["Cancelled"].isna()].copy()
     df["month"] = month
     all_sales.append(df)
-    print(f"✅ Sale {month:02d}: {len(df):,} rows | {df['Material'].nunique():,} SKUs")
+    print(f"✅ Sale {month:02d}: {len(df):,} rows | {df['Material'].nunique():,} SKUs", flush=True)
 
 sales = pd.concat(all_sales, ignore_index=True)
 sales["Material"]       = sales["Material"].astype(str).str.strip()
@@ -177,7 +181,7 @@ for t, p in fg_price_by_type.items():
 
 
 # ── 6. โหลด SO ค้างส่ง ───────────────────────────────────────────────────────
-SO_FILE = "SO_BL 22.04.69.xlsx"
+SO_FILE = os.path.join(_BASE_DIR, "01_Bronze_Raw", "inventory", "amc", "so_bl_20260422.xlsx")
 
 so_raw = pd.read_excel(SO_FILE, sheet_name="SO_BL")
 so_raw["Material"]               = so_raw["Material"].astype(str).str.strip()
@@ -292,7 +296,7 @@ out_cols = [
 output = result[[c for c in out_cols if c in result.columns]].copy()
 output[output.select_dtypes("float").columns] = output.select_dtypes("float").round(4)
 
-output_file = "NRV_SKU_Analysis_2026_Q1_v2.xlsx"
+output_file = os.path.join(_BASE_DIR, "01_Bronze_Raw", "inventory", "amc", "nrv_sku_202603.xlsx")
 
 with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
 

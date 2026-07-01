@@ -42,31 +42,27 @@ def get_tools_status():
     # ── Bronze ───────────────────────────────────────────────────────────────
     bronze = {
         "sales_2026": _scan_bronze_months(
-            "Sales_Reports/2026/sale_{mm}.2026.XLSX", months_2026),
+            "sales/amc/2026/vf05_2026{mm}.xlsx", months_2026),
         "production_2026": _scan_bronze_months(
-            "Production/2026/1100.{mm}.2026.XLSX", months_2026),
+            "warehouse_stock/amc/2026/mb52_1100_2026{mm}.xlsx", months_2026),
         "prd_1100": _scan_bronze_months(
-            "PRD_GI/PRD_1100_{mm}.2026.XLSX", months_2026),
+            "production_orders/amc/1100/2026/prd_2026{mm}.xlsx", months_2026),
         "prd_1200": _scan_bronze_months(
-            "PRD_GI/PRD_1200_{mm}.2026.XLSX", months_2026),
+            "production_orders/amc/1200/2026/prd_2026{mm}.xlsx", months_2026),
         "prd_1300": _scan_bronze_months(
-            "PRD_GI/PRD_1300_{mm}.2026.XLSX", months_2026),
+            "production_orders/amc/1300/2026/prd_2026{mm}.xlsx", months_2026),
         "mb51_all": _scan_bronze_months(
-            "PRD_GI/MB51_all plant_{mm}.2026.XLSX", months_2026),
-        "mb51_ingot": _scan_bronze_months(
-            "PRD_GI/MB51_ingot_{mm}.2026.XLSX", months_2026),
+            "material_docs/amc/all/2026/mb51_all_2026{mm}.xlsx", months_2026),
         "ksb1_1100": _scan_bronze_months(
-            "PRD_GI/KSB1_1100_{mm}.2026.XLSX", months_2026),
+            "cost_center/amc/1100/2026/ksb1_2026{mm}.xlsx", months_2026),
         "ksb1_1200": _scan_bronze_months(
-            "PRD_GI/KSB1_1200_{mm}.2026.XLSX", months_2026),
+            "cost_center/amc/1200/2026/ksb1_2026{mm}.xlsx", months_2026),
         "ksb1_1300": _scan_bronze_months(
-            "PRD_GI/KSB1_1300_{mm}.2026.XLSX", months_2026),
+            "cost_center/amc/1300/2026/ksb1_2026{mm}.xlsx", months_2026),
         "gl_2026": _scan_bronze_months(
-            "GL_Transactions/2026/gl_2026_{mm}.XLSX", months_2026),
-        "amc_gl": _scan_bronze_months(
-            "PRD_GI/AMC_GL_{mm}.2026.XLSX", months_2026),
+            "gl/amc/2026/gl_2026{mm}.xlsx", months_2026),
         "amc_tb": _scan_bronze_months(
-            "PRD_GI/AMC_TB_{mm}.2026.XLSX", months_2026),
+            "tb_snapshots/amc/2026/tb_2026{mm}.xlsx", months_2026),
     }
 
     # ── Silver ────────────────────────────────────────────────────────────────

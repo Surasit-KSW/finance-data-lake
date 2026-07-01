@@ -29,7 +29,7 @@ class SAPConnector:
         Read monthly Excel files from year subdirectories.
 
         Args:
-            bronze_path: Path to Bronze domain folder (e.g. 01_Bronze_Raw/GL_Transactions)
+            bronze_path: Path to Bronze domain folder (e.g. 01_Bronze_Raw/gl/amc or 01_Bronze_Raw/sales/amc)
             year: If set, process only this year. If None, detect all year subdirs.
             filename_fn: Callable(year_str, month_str) -> list[str] of candidate filenames.
                          If None, reads ALL .xlsx/.XLSX files in each year dir.
@@ -86,7 +86,7 @@ class SAPConnector:
     def read_flat_files(self, bronze_path: Path, glob_pattern: str = "*.XLSX") -> pd.DataFrame:
         """
         Read Excel files directly from bronze_path (no year subdirs).
-        Used for AR data: 01_Bronze_Raw/AR_Data/AR_2024.XLSX
+        Used for AR data: 01_Bronze_Raw/ar/amc/ar_2024.xlsx
         """
         if not bronze_path.exists():
             print(f"  ⚠️  Bronze path not found: {bronze_path}")

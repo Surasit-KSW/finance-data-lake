@@ -37,7 +37,7 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────────────
 INPUT_FILE = (
     r"D:\_Work_Workspace\03_Data_Projects\_Finance_Data_Lake"
-    r"\01_Bronze_Raw\Sales_Reports\AMC_Analytic sales questions Q1'26 m.xlsx"
+    r"\01_Bronze_Raw\templates\analytic_sales_q1_2026.xlsx"
 )
 OUTPUT_FILE = (
     r"D:\_Work_Workspace\03_Data_Projects\_Finance_Data_Lake"
@@ -46,23 +46,23 @@ OUTPUT_FILE = (
 
 SALES_RAW_DIR = (
     r"D:\_Work_Workspace\03_Data_Projects\_Finance_Data_Lake"
-    r"\01_Bronze_Raw\Sales_Reports"
+    r"\01_Bronze_Raw\sales\amc"
 )
 SALES_FILES = {
     "Q1'26": [
-        rf"{SALES_RAW_DIR}\2026\sale_01.2026.XLSX",
-        rf"{SALES_RAW_DIR}\2026\sale_02.2026.XLSX",
-        rf"{SALES_RAW_DIR}\2026\sale_03.2026.XLSX",
+        rf"{SALES_RAW_DIR}\2026\vf05_202601.xlsx",
+        rf"{SALES_RAW_DIR}\2026\vf05_202602.xlsx",
+        rf"{SALES_RAW_DIR}\2026\vf05_202603.xlsx",
     ],
     "Q1'25": [
-        rf"{SALES_RAW_DIR}\2025\sale_2025_01.XLSX",
-        rf"{SALES_RAW_DIR}\2025\sale_2025_02.XLSX",
-        rf"{SALES_RAW_DIR}\2025\sale_2025_03.XLSX",
+        rf"{SALES_RAW_DIR}\2025\vf05_202501.xlsx",
+        rf"{SALES_RAW_DIR}\2025\vf05_202502.xlsx",
+        rf"{SALES_RAW_DIR}\2025\vf05_202503.xlsx",
     ],
     "Q4'25": [
-        rf"{SALES_RAW_DIR}\2025\sale_2025_10.XLSX",
-        rf"{SALES_RAW_DIR}\2025\sale_2025_11.XLSX",
-        rf"{SALES_RAW_DIR}\2025\sale_2025_12.XLSX",
+        rf"{SALES_RAW_DIR}\2025\vf05_202510.xlsx",
+        rf"{SALES_RAW_DIR}\2025\vf05_202511.xlsx",
+        rf"{SALES_RAW_DIR}\2025\vf05_202512.xlsx",
     ],
 }
 

@@ -32,15 +32,17 @@ from watchdog.observers import Observer
 BRONZE_ROOT = Path(__file__).parent / "01_Bronze_Raw"
 LOG_FILE    = Path(__file__).parent / "logs" / "watch_bronze.log"
 
-# Map Bronze subfolder → ETL domain
+# Map Bronze subfolder → ETL domain (new domain-based structure)
 FOLDER_TO_DOMAIN = {
-    "GL_Transactions":   "gl",
-    "AR_Data":           "ar",
-    "AP_Data":           "ar",   # AP ยังไม่มี ETL แยก → fallback ไป ar
-    "Sales_Reports":     "sales",
-    "Production":        "production",
-    "monthend":          "gl",   # KSB1 cost center → ใช้ gl ETL
-    "Inventory_RollStock": "gl", # Trial Balance → gl ETL
+    "gl":                  "gl",
+    "ar":                  "ar",
+    "sales":               "sales",
+    "warehouse_stock":     "production",
+    "production_orders":   "production",
+    "material_docs":       "production",
+    "cost_center":         "gl",       # KSB1 cost center → ใช้ gl ETL
+    "tb_snapshots":        "gl",       # Trial Balance → gl ETL
+    "inventory":           "gl",       # NRV inventory → gl ETL
 }
 
 # ไฟล์ที่ไม่ต้อง trigger (temp files, locks, etc.)

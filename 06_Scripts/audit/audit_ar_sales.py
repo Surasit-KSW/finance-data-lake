@@ -10,7 +10,7 @@ pd.set_option('display.float_format', '{:,.2f}'.format)
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 _SILVER = os.path.join(_PROJECT_ROOT, "02_Silver_Cleaned")
-_BRONZE_AR = os.path.join(_PROJECT_ROOT, "01_Bronze_Raw", "AR_Data")
+_BRONZE_AR = os.path.join(_PROJECT_ROOT, "01_Bronze_Raw", "ar", "amc")
 
 print("⏳ กำลังโหลดและประมวลผลข้อมูล Sales & AR (2023 - 2025)...")
 
@@ -85,7 +85,7 @@ ar_path = _BRONZE_AR
 ar_list = []
 
 for year in [2023, 2024, 2025]:
-    path = os.path.join(ar_path, f'AR_{year}.XLSX')
+    path = os.path.join(ar_path, f'ar_{year}.xlsx')
     if os.path.exists(path):
         df = pd.read_excel(path, engine='openpyxl')
         df['Year'] = year

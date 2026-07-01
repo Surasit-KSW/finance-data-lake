@@ -24,9 +24,9 @@ import pandas as pd
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 LAKE_ROOT = Path(__file__).resolve().parents[2]
-GL_DIR  = LAKE_ROOT / "01_Bronze_Raw/GL_Transactions/2026/GA"
-TB_DIR  = LAKE_ROOT / "01_Bronze_Raw/TB_Snapshots/GA"
-PRD_DIR = LAKE_ROOT / "01_Bronze_Raw/PRD_GI/GA"
+GL_DIR  = LAKE_ROOT / "01_Bronze_Raw/gl/ga/2026"
+TB_DIR  = LAKE_ROOT / "01_Bronze_Raw/tb_snapshots/ga"
+PRD_DIR = LAKE_ROOT / "01_Bronze_Raw/production_orders/ga/2200"
 SILVER  = LAKE_ROOT / "02_Silver_Cleaned"
 
 MONTH_LABELS = {
@@ -39,7 +39,7 @@ MONTH_LABELS = {
 # ── GL Reader ─────────────────────────────────────────────────────────────────
 def read_gl(year: str, month: str):
     """Read GA GL file for a given year/month. Returns (Series by GL_Account, text_map dict)."""
-    path = GL_DIR / f"GA_GL_{month}.{year}.XLSX"
+    path = GL_DIR / f"gl_{year}{month}.xlsx"
     if not path.exists():
         return None, {}
     df = pd.read_excel(path, header=0)
@@ -214,7 +214,7 @@ def build_pnl(year: str, month: str) -> dict | None:
 
 # ── PRD Reader ────────────────────────────────────────────────────────────────
 def read_prd(year: str, month: str) -> dict | None:
-    path = PRD_DIR / f"GA_PRD_{month}.{year}.XLSX"
+    path = PRD_DIR / f"prd_{year}{month}.xlsx"
     if not path.exists():
         return None
     df = pd.read_excel(path, header=0)
@@ -276,7 +276,7 @@ def main():
 
     for month in months:
         label = f"{MONTH_LABELS[month]} {year}"
-        gl_path = GL_DIR / f"GA_GL_{month}.{year}.XLSX"
+        gl_path = GL_DIR / f"gl_{year}{month}.xlsx"
         if not gl_path.exists():
             print(f"  [SKIP] {label} — GL file not found")
             continue
