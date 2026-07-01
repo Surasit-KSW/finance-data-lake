@@ -84,6 +84,9 @@ class Settings(BaseSettings):
         "http://localhost:8501",
         "http://localhost:8502",
         "https://fintech-command-center.vercel.app",
+        # Obsidian (Electron) — for DataviewJS fetch in Finance Vault dashboard
+        "app://obsidian.md",
+        "capacitor://localhost",
     ]
 
     @property

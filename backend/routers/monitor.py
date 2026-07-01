@@ -73,9 +73,9 @@ ACCOUNT_COST_GROUP: dict[str, str | None] = {
     "552": "labor",
     "561": "electricity",
     "562": "electricity",
-    "571": "depreciation",
-    "572": "depreciation",
-    "581": "spare_rm",    # Repair & Maintenance / Spare Parts
+    "571": "spare_rm",     # Repair & Maintenance / Spare Parts
+    "572": "spare_rm",     # Repair & Maintenance
+    "581": "depreciation", # Depreciation
     "591": "lng_gas",     # LNG / Natural Gas
     "592": "atm_gas",     # H₂ / N₂ atmosphere gas
     "593": "chemicals",   # Chemicals & supplies

@@ -36,7 +36,9 @@ def query_scalar(sql: str, params: list | None = None) -> Any:
 
 
 def get_view_counts() -> dict[str, int]:
-    """Return row count for every view in finance_lake.duckdb."""
+    """Return row count for every view in finance_lake.duckdb.
+    Views whose underlying Parquet files are missing are counted as -1.
+    """
     con = get_duck()
     try:
         views = con.execute(
@@ -45,8 +47,11 @@ def get_view_counts() -> dict[str, int]:
         ).fetchall()
         counts = {}
         for (name,) in views:
-            cnt = con.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-            counts[name] = cnt
+            try:
+                cnt = con.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+                counts[name] = cnt
+            except Exception:
+                counts[name] = -1  # missing Parquet file
         return counts
     finally:
         con.close()
