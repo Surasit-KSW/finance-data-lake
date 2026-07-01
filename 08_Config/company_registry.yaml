@@ -18,7 +18,7 @@ companies:
       sales:            "01_Bronze_Raw/sales/amc"                    # VF05  — by year subfolder
       tb:               "01_Bronze_Raw/tb_snapshots/amc"             # F.01  — by year subfolder
       zcor001:          "01_Bronze_Raw/zcor001/amc"                  # ZCOR001 production report — by year subfolder
-      production_orders:"01_Bronze_Raw/production_orders/amc"        # PRD   — by plant/year
+      production_orders: "01_Bronze_Raw/production_orders/amc"        # PRD   — by plant/year
       cost_center:      "01_Bronze_Raw/cost_center/amc"              # KSB1  — by plant/year
       material_docs:    "01_Bronze_Raw/material_docs/amc"            # MB51  — by plant/year
       ar:               "01_Bronze_Raw/ar/amc"                       # FBL5N
@@ -36,7 +36,7 @@ companies:
       gl:               "01_Bronze_Raw/gl/ga"                        # FBL3N
       sales:            "01_Bronze_Raw/sales/ga"                     # VF05
       tb:               "01_Bronze_Raw/tb_snapshots/ga"              # F.01
-      production_orders:"01_Bronze_Raw/production_orders/ga"         # PRD
+      production_orders: "01_Bronze_Raw/production_orders/ga"         # PRD
       cost_center:      "01_Bronze_Raw/cost_center/ga"               # KSB1
       material_docs:    "01_Bronze_Raw/material_docs/ga"             # MB51
       inventory:        "01_Bronze_Raw/inventory/ga"                 # Roll stock

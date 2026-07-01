@@ -42,8 +42,10 @@ class GLTransformETL(BaseSilverETL):
     def extract(self) -> pd.DataFrame:
         def gl_filenames(yr: str, month: str):
             return [
-                f"gl_{yr}_{month}.XLSX",
+                f"gl_{yr}{month}.xlsx",
+                f"gl_{yr}{month}.XLSX",
                 f"gl_{yr}_{month}.xlsx",
+                f"gl_{yr}_{month}.XLSX",
             ]
 
         return self.connector.read_monthly_files(

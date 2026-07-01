@@ -26,18 +26,36 @@ OUTPUT_FILE = SILVER_PATH / f"master_ksb1_{COMPANY_CODE}.parquet"
 # Only process these plant codes (skip _all_, _probe_, __ variants)
 VALID_PLANTS = {"1100", "1200", "1300"}
 
+# Derive plant from first 2 digits of cost_center (e.g. "1387110" → "13" → "1300")
+CC_PREFIX_TO_PLANT = {"11": "1100", "12": "1200", "13": "1300"}
+
+
+def derive_plant(cost_center: str) -> str:
+    """Map cost_center prefix to plant code. Returns '' if unknown."""
+    return CC_PREFIX_TO_PLANT.get(str(cost_center)[:2], "")
+
 
 def parse_filename(fname: str, parent_dir: str = None):
-    """Parse 'ksb1_{YYYYMM}.xlsx' → (plant, month, year) or None.
-    Plant is derived from the parent directory name."""
+    """Parse 'ksb1_{YYYYMM}.xlsx' or 'ksb1_all_{YYYYMM}.xlsx' → (source, month, year) or None.
+    source = plant code (e.g. '1300') or 'all' for all-plant aggregate files."""
+    # Per-plant file: ksb1_YYYYMM.xlsx
     m = re.match(r"ksb1_(\d{4})(\d{2})\.xlsx", fname, re.IGNORECASE)
-    if not m:
+    if m:
+        year, month = int(m.group(1)), int(m.group(2))
+        plant = str(parent_dir) if parent_dir else ""
+        if plant in VALID_PLANTS:
+            return plant, month, year
+        if plant == "all":
+            return "all", month, year
         return None
-    year, month = int(m.group(1)), int(m.group(2))
-    plant = str(parent_dir) if parent_dir else ""
-    if plant not in VALID_PLANTS:
-        return None
-    return plant, month, year
+
+    # All-plant aggregate file: ksb1_all_YYYYMM.xlsx
+    m2 = re.match(r"ksb1_all_(\d{4})(\d{2})\.xlsx", fname, re.IGNORECASE)
+    if m2:
+        year, month = int(m2.group(1)), int(m2.group(2))
+        return "all", month, year
+
+    return None
 
 
 def _str(v) -> str:
@@ -45,8 +63,10 @@ def _str(v) -> str:
     return str(v).strip() if v is not None else ""
 
 
-def read_ksb1_file(fpath: Path, plant: str, month: int, year: int) -> pd.DataFrame:
-    """Read one KSB1 Excel file, return cleaned DataFrame."""
+def read_ksb1_file(fpath: Path, source: str, month: int, year: int) -> pd.DataFrame:
+    """Read one KSB1 Excel file, return cleaned DataFrame.
+    source = plant code ('1100'/'1200'/'1300') or 'all' (all-plant file).
+    When source='all', plant is derived per-row from cost_center prefix."""
     print(f"  ⏳ {fpath.name} ...", end=" ")
     try:
         wb = openpyxl.load_workbook(fpath, read_only=True, data_only=True)
@@ -68,12 +88,15 @@ def read_ksb1_file(fpath: Path, plant: str, month: int, year: int) -> pd.DataFra
                 amount = 0.0
                 quantity = 0.0
 
+            cc = _str(row[0])
+            plant = derive_plant(cc) if source == "all" else source
+
             rows.append({
                 "company_code":        COMPANY_CODE,
                 "year":                year,
                 "month":               month,
                 "plant":               plant,
-                "cost_center":         _str(row[0]),
+                "cost_center":         cc,
                 "co_account":          _str(row[1]),
                 "account_name":        _str(row[2]),
                 "amount":              amount,
@@ -122,12 +145,12 @@ def run(year_filter: int = None):
             plant_dir = ""
         parsed = parse_filename(fpath.name, parent_dir=plant_dir)
         if not parsed:
-            print(f"  ⏭  {fpath.name} — skipped (not a per-plant file)")
+            print(f"  ⏭  {fpath.name} — skipped (unrecognised filename)")
             continue
-        plant, month, year = parsed
+        source, month, year = parsed
         if year_filter and year != year_filter:
             continue
-        df = read_ksb1_file(fpath, plant, month, year)
+        df = read_ksb1_file(fpath, source, month, year)
         if not df.empty:
             all_frames.append(df)
 
@@ -136,6 +159,12 @@ def run(year_filter: int = None):
         return
 
     combined = pd.concat(all_frames, ignore_index=True)
+
+    # Drop rows where plant could not be derived (unknown CC prefix)
+    unknown = combined["plant"] == ""
+    if unknown.any():
+        print(f"  ⏭  {unknown.sum():,} rows skipped — unknown plant (CC prefix not in mapping)")
+    combined = combined[~unknown].copy()
 
     # Enforce types
     combined["year"] = combined["year"].astype(int)
