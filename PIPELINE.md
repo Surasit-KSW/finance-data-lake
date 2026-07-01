@@ -10,13 +10,13 @@ Monthly SAP data refresh guide. Run from the project root:
 
 ```
 SAP Export (Excel)
-  [manual]                        → 01_Bronze_Raw/          Step 1: File drop
-  [run_pipeline.py --layer silver]→ 02_Silver_Cleaned/      Step 2: ETL Silver
-  [run_pipeline.py --layer gold]  → 03_Gold_DataMarts/      Step 3a: GL Summary only
-  [python -m gold_aggregation.*]  → 03_Gold_DataMarts/      Step 3b: Audit Gold Parquets
-  [run_pipeline.py --init-db]     → finance_lake.duckdb     Step 4: DuckDB views
-  [uvicorn]                       → REST API :8000           Step 5: Serve locally
-  [migrate_to_neon.py]            → Neon PostgreSQL          Step 6: Sync cloud
+  [manual]                          → 01_Bronze_Raw/          Step 1: File drop
+  [orchestrator.py --layer silver]  → 02_Silver_Cleaned/      Step 2: ETL Silver
+  [orchestrator.py --layer gold]    → 03_Gold_DataMarts/      Step 3a: GL Summary only
+  [orchestrator.py --include-gold]  → 03_Gold_DataMarts/      Step 3b: Audit Gold Parquets (automated)
+  [orchestrator.py --init-db]       → finance_lake.duckdb     Step 4: DuckDB views
+  [uvicorn]                         → REST API :8000           Step 5: Serve locally
+  [migrate_to_neon.py]              → Neon PostgreSQL          Step 6: Sync cloud
 ```
 
 ---
@@ -58,25 +58,26 @@ Silver scripts clean, type-cast, and consolidate raw Excel into Parquet format.
 
 ### Run all Silver transforms:
 ```bash
-python run_pipeline.py --layer silver
+python orchestrator.py --layer silver
+# (run_pipeline.py --layer silver also works — forwards to orchestrator automatically)
 ```
 
 ### Run a specific domain only:
 ```bash
-python run_pipeline.py --layer silver --domain gl
-python run_pipeline.py --layer silver --domain sales --year 2026
-python run_pipeline.py --layer silver --domain production --year 2026
-python run_pipeline.py --layer silver --domain ar
+python orchestrator.py --layer silver --domain gl
+python orchestrator.py --layer silver --domain sales --year 2026
+python orchestrator.py --layer silver --domain production --year 2026
+python orchestrator.py --layer silver --domain ar
 ```
 
 **What each script produces:**
 
 | Script | Source | Output |
 |--------|--------|--------|
-| `etl_gl.py` | `01_Bronze_Raw/GL_Transactions/*.XLSX` | `02_Silver_Cleaned/Master_GL_24_25.parquet` |
-| `etl_sales.py --year YYYY` | `01_Bronze_Raw/Sales_Reports/YYYY/*.XLSX` | `02_Silver_Cleaned/master_sales_YYYY.parquet` |
-| `etl_production.py --year YYYY` | `01_Bronze_Raw/Production/YYYY/*.XLSX` | `02_Silver_Cleaned/master_production_YYYY.parquet` |
-| `etl_ar.py` | `01_Bronze_Raw/AR_Data/*.XLSX` | `02_Silver_Cleaned/master_ar.parquet` *(ยังไม่มีไฟล์)* |
+| `etl_gl.py` | `01_Bronze_Raw/GL_Transactions/*.XLSX` | `02_Silver_Cleaned/master_gl_1000.parquet` |
+| `etl_sales.py --year YYYY` | `01_Bronze_Raw/Sales_Reports/YYYY/*.XLSX` | `02_Silver_Cleaned/master_sales_1000.parquet` |
+| `etl_production.py --year YYYY` | `01_Bronze_Raw/Production/YYYY/*.XLSX` | `02_Silver_Cleaned/master_production_1000.parquet` |
+| `etl_ar.py` | `01_Bronze_Raw/AR_Data/*.XLSX` | `02_Silver_Cleaned/master_ar_1000.parquet` *(ยังไม่มีไฟล์)* |
 
 **Verify Step 2:**
 ```bash
@@ -90,12 +91,13 @@ for f in sorted(glob.glob('02_Silver_Cleaned/*.parquet')):
 
 ---
 
-## Step 3a — Gold ETL: GL Summary (via run_pipeline.py)
+## Step 3a — Gold ETL: GL Summary (via orchestrator.py)
 
 `--layer gold` รันเฉพาะ **GL Summary** เท่านั้น — ใช้สำหรับ API dashboard
 
 ```bash
-python run_pipeline.py --layer gold
+python orchestrator.py --layer gold
+# (run_pipeline.py --layer gold also works — forwards to orchestrator automatically)
 ```
 
 | Script | Source | Output |
@@ -114,9 +116,19 @@ print(df.groupby('Year')['Net_Amount'].sum().to_string())
 
 ---
 
-## Step 3b — Gold ETL: Audit Parquets (รันแยก)
+## Step 3b — Gold ETL: Audit Parquets (automated via orchestrator.py)
 
-Gold Parquets สำหรับ audit/financial statements ต้องรันแยก — **ไม่อยู่ใน run_pipeline.py**
+Gold Parquets สำหรับ audit/financial statements สามารถรันอัตโนมัติผ่าน orchestrator.py แล้ว:
+
+```bash
+# Silver + GL Summary + ทุก Gold Parquets + init-db ในคำสั่งเดียว:
+python orchestrator.py --all --include-gold
+
+# Gold scripts เท่านั้น (ใช้เมื่อ Silver เป็นปัจจุบันแล้ว):
+# python orchestrator.py --gold-only   ← coming in Wave 2
+```
+
+หรือรันแยกทีละ script ตาม dependency ลำดับนี้:
 
 **ลำดับ dependency:**
 ```
@@ -154,7 +166,7 @@ python -m 04_Data_Pipelines.gold_aggregation.create_related_party --year 2025 --
 | `gold_elimination.parquet` | Consolidation Elimination Entries |
 | `gold_related_party.parquet` | Related Party Transactions & Balances |
 
-> **Note:** Gold Parquets เหล่านี้ไม่มี DuckDB view — อ่านโดยตรงด้วย `pd.read_parquet()`
+> **Note:** Gold Parquets เหล่านี้มี DuckDB view (gold_leadsheet, gold_cashflow, gold_ppe, gold_elimination, gold_related_party) — ดู Step 4
 
 ---
 
@@ -163,7 +175,8 @@ python -m 04_Data_Pipelines.gold_aggregation.create_related_party --year 2025 --
 Creates or refreshes all DuckDB views pointing at the updated Parquet files.
 
 ```bash
-python run_pipeline.py --init-db
+python orchestrator.py --init-db
+# (run_pipeline.py --init-db also works — forwards to orchestrator automatically)
 # or directly:
 python 04_Data_Pipelines/init_duckdb.py
 ```
@@ -172,17 +185,18 @@ python 04_Data_Pipelines/init_duckdb.py
 
 | View | Source Parquet | หมายเหตุ |
 |------|---------------|---------|
-| `v_gl` | `Master_GL_24_25.parquet` | GL transactions 2024–2025 |
+| `v_gl` | `master_gl_1000.parquet` | GL transactions (company 1000) |
 | `v_gl_summary` | `Summary_GL_24_25.parquet` | GL summary (Gold) |
-| `v_sales` | `master_sales_*.parquet` | wildcard ทุกปี |
-| `v_sales_2023` | `master_sales_2023.parquet` | เฉพาะปี 2023 |
-| `v_sales_2024` | `master_sales_2024.parquet` | เฉพาะปี 2024 |
-| `v_sales_2025` | `master_sales_2025.parquet` | เฉพาะปี 2025 |
-| `v_production` | `master_production_*.parquet` | wildcard ทุกปี |
-| `v_production_2023` | `master_production_2023.parquet` | เฉพาะปี 2023 |
-| `v_production_2024` | `master_production_2024.parquet` | เฉพาะปี 2024 |
-| `v_production_2025` | `master_production_2025.parquet` | เฉพาะปี 2025 |
-| `v_ar` | `master_ar.parquet` | ⚠️ ข้ามถ้าไม่มีไฟล์ |
+| `v_sales` | `master_sales_1000.parquet` | Sales (company 1000) |
+| `v_production` | `master_production_1000.parquet` | Production (company 1000) |
+| `v_ar` | `master_ar_1000.parquet` | ⚠️ ข้ามถ้าไม่มีไฟล์ |
+| `v_mb51` | `master_mb51_*.parquet` | MB51 material cost orders (standalone ETL) |
+| `v_prd` | `master_prd_*.parquet` | Production daily log (standalone ETL) |
+| `gold_leadsheet` | `gold_leadsheet.parquet` | Audit leadsheet P&L+BS |
+| `gold_cashflow` | `gold_cashflow.parquet` | Cash flow (indirect method) |
+| `gold_ppe` | `gold_ppe.parquet` | PPE roll-forward schedule |
+| `gold_elimination` | `gold_elimination.parquet` | Consolidation elimination entries |
+| `gold_related_party` | `gold_related_party.parquet` | Related party transactions |
 
 **Verify Step 4:**
 ```bash
@@ -253,15 +267,16 @@ curl https://finance-data-lake.onrender.com/api/v1/health
 # 1. Drop new SAP files into 01_Bronze_Raw/ (manual)
 
 # 2-4. Silver + Gold GL Summary + DuckDB in one command:
-python run_pipeline.py --all
+python orchestrator.py --all
+# (run_pipeline.py --all also works — forwards to orchestrator automatically)
+
+# 2-4b. (ถ้าต้องการ audit Gold Parquets ด้วย):
+python orchestrator.py --all --include-gold
 
 # 5. Restart local API
 uvicorn backend.main:app --reload --port 8000
 
-# 6. (ถ้าต้องการ audit Parquets) — รันแยกตาม quarter
-python -m 04_Data_Pipelines.gold_aggregation.create_leadsheet --year 2025 --quarter Q1
-
-# 7. Sync to cloud
+# 6. Sync to cloud
 python scripts/migrate_to_neon.py
 ```
 
@@ -273,13 +288,13 @@ python scripts/migrate_to_neon.py
 |---------|-------|-----|
 | ETL exits with "ไม่พบไฟล์" | Bronze file missing or wrong name | Check folder + verify filename pattern |
 | DuckDB views empty after `--init-db` | Silver Parquet not generated | Run `--layer silver` first |
-| API returns `{"status": "degraded"}` | DuckDB missing or views stale | `python run_pipeline.py --init-db` |
+| API returns `{"status": "degraded"}` | DuckDB missing or views stale | `python orchestrator.py --init-db` |
 | Silver row count lower than expected | New month file not in Bronze | Verify `01_Bronze_Raw/Sales_Reports/YYYY/` has new file |
 | `migrate_to_neon.py` fails auth error | `DATABASE_URL` not set | Check `.env` file |
 | `/api/v1/cost-closing/zreport` returns 404 | `sap_cost_closing_app/data/processed/` missing | Run cost closing pipeline in that project |
-| `finance_lake.duckdb` not found | DuckDB never initialized | `python run_pipeline.py --init-db` |
+| `finance_lake.duckdb` not found | DuckDB never initialized | `python orchestrator.py --init-db` |
 | API returns old data after ETL | Old DuckDB process using cached views | Restart `uvicorn` |
-| `v_ar` ถูก skip ใน init_duckdb | `master_ar.parquet` ยังไม่ได้รัน | `python run_pipeline.py --layer silver --domain ar` |
+| `v_ar` ถูก skip ใน init_duckdb | `master_ar_1000.parquet` ยังไม่ได้รัน | `python orchestrator.py --layer silver --domain ar` |
 | `create_cashflow.py` error — leadsheet not found | Gold leadsheet ยังไม่มี | รัน `create_leadsheet.py` ก่อน |
 
 ---
@@ -316,9 +331,9 @@ When starting data for a new year (e.g., 2026):
 
 5. Re-run:
    ```bash
-   python run_pipeline.py --layer silver --domain sales --year 2026
-   python run_pipeline.py --layer silver --domain production --year 2026
-   python run_pipeline.py --init-db
+   python orchestrator.py --layer silver --domain sales --year 2026
+   python orchestrator.py --layer silver --domain production --year 2026
+   python orchestrator.py --init-db
    ```
 
 ---
