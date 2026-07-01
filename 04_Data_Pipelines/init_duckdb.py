@@ -45,6 +45,7 @@ VIEWS = {
     "v_mb51": os.path.join(SILVER, "master_mb51_*.parquet"),
     "v_prd":  os.path.join(SILVER, "master_prd_*.parquet"),
     "v_tb":   os.path.join(SILVER, "master_tb_*.parquet"),
+    "v_ksb1": os.path.join(SILVER, "master_ksb1_*.parquet"),
 
     # Gold — audit parquets (freshness depends on manual gold run or orchestrator --gold-only)
     "gold_leadsheet":     os.path.join(GOLD, "gold_leadsheet.parquet"),
