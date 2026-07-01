@@ -41,8 +41,8 @@ def gl_transactions(
     limit:    int            = Query(500, le=5000),
 ):
     """GL transactions drill-down จาก v_gl (2.7M rows)"""
-    conditions = ["CAST(Year AS INTEGER) = ?"]
-    params: list = [year]
+    conditions = ["company_code = ?", "CAST(Year AS INTEGER) = ?"]
+    params: list = ["1000", year]
 
     if month is not None:
         conditions.append("CAST(Month AS INTEGER) = ?")

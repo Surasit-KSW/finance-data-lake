@@ -16,12 +16,13 @@ def sales_summary(year: int):
             SUM("Billed Qty")                        AS qty_kg,
             COUNT(DISTINCT "Billing No")             AS invoices
         FROM v_sales
-        WHERE EXTRACT(YEAR FROM "Billing Date")::int = ?
+        WHERE company_code = ?
+          AND EXTRACT(YEAR FROM "Billing Date")::int = ?
           AND "Net Value(THB)" > 0
         GROUP BY month, product_group
         ORDER BY month, revenue DESC
         """,
-        [year],
+        ["1000", year],
     )
     return {"status": "ok", "year": year, "count": len(df),
             "data": df.to_dict(orient="records")}
@@ -42,13 +43,14 @@ def top_customers(
             COUNT(DISTINCT "Billing No")                        AS invoices,
             COUNT(DISTINCT EXTRACT(MONTH FROM "Billing Date"))  AS active_months
         FROM v_sales
-        WHERE EXTRACT(YEAR FROM "Billing Date")::int = ?
+        WHERE company_code = ?
+          AND EXTRACT(YEAR FROM "Billing Date")::int = ?
           AND "Net Value(THB)" > 0
         GROUP BY customer
         ORDER BY revenue DESC
         LIMIT ?
         """,
-        [year, top],
+        ["1000", year, top],
     )
     return {"status": "ok", "year": year, "data": df.to_dict(orient="records")}
 
@@ -67,12 +69,13 @@ def sales_yoy(
             SUM("Net Value(THB)")                   AS revenue,
             SUM("Billed Qty")                       AS qty_kg
         FROM v_sales
-        WHERE EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
+        WHERE company_code = ?
+          AND EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
           AND "Net Value(THB)" > 0
         GROUP BY year, product_group
         ORDER BY product_group, year
         """,
-        [year1, year2],
+        ["1000", year1, year2],
     )
     return {"status": "ok", "year1": year1, "year2": year2,
             "data": df.to_dict(orient="records")}
@@ -91,11 +94,12 @@ def sales_by_month(
             EXTRACT(MONTH FROM "Billing Date")::int  AS month,
             SUM("Net Value(THB)")                    AS revenue
         FROM v_sales
-        WHERE EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
+        WHERE company_code = ?
+          AND EXTRACT(YEAR FROM "Billing Date")::int IN (?, ?)
           AND "Net Value(THB)" > 0
         GROUP BY year, month
         ORDER BY year, month
         """,
-        [year1, year2],
+        ["1000", year1, year2],
     )
     return {"status": "ok", "data": df.to_dict(orient="records")}

@@ -19,12 +19,13 @@ def ar_summary(year: int = Query(...)):
             SUM(net_amount)               AS net_movement,
             COUNT(*)                        AS transactions
         FROM v_gl
-        WHERE CAST(Year AS INTEGER) = ?
+        WHERE company_code = ?
+          AND CAST(Year AS INTEGER) = ?
           AND "G/L Account" LIKE '12%'
         GROUP BY month, gl_account, gl_name
         ORDER BY month, gl_account
         """,
-        [year],
+        ["1000", year],
     )
 
     total = float(df["net_movement"].sum()) if not df.empty else 0.0
@@ -49,11 +50,12 @@ def ar_by_account(year: int = Query(...)):
             SUM(net_amount)               AS balance,
             COUNT(*)                        AS transactions
         FROM v_gl
-        WHERE CAST(Year AS INTEGER) = ?
+        WHERE company_code = ?
+          AND CAST(Year AS INTEGER) = ?
           AND "G/L Account" LIKE '12%'
         GROUP BY gl_account, gl_name
         ORDER BY balance
         """,
-        [year],
+        ["1000", year],
     )
     return {"status": "ok", "data": df.to_dict(orient="records")}

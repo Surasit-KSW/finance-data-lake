@@ -166,10 +166,11 @@ def _calc_dso(year: int) -> float | None:
             """
             SELECT SUM("Company Code Currency Value") AS ar_balance
             FROM v_gl
-            WHERE CAST(Year AS INTEGER) = ?
+            WHERE company_code = ?
+              AND CAST(Year AS INTEGER) = ?
               AND "G/L Account" LIKE '12%'
             """,
-            [year],
+            ["1000", year],
         )
         ar_balance = float(ar_row["ar_balance"].iloc[0] or 0)
 

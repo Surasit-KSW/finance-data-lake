@@ -181,12 +181,13 @@ def _query_gl_by_account(
     excl_ints = [int(a) for a in GL_EXCLUSION]
     excl_placeholders = _in_clause(excl_ints) if excl_ints else "(-1)"
     conds = [
+        "company_code = ?",
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
         f"CAST(CAST(\"G/L Account\" AS DOUBLE) AS BIGINT) NOT IN {excl_placeholders}",
     ]
-    params: list = [year] + months + excl_ints
+    params: list = ["1000", year] + months + excl_ints
 
     if cc_prefix:
         # Conv: Cost Center prefix  |  RM (541x): Production order Reference prefix
@@ -241,12 +242,13 @@ def _query_production_volume(
     """
     # v_production columns are case-sensitive (quoted DDL): "Year", "Month", "Material", "Plant"
     conds = [
+        'company_code = ?',
         'CAST("Year" AS INTEGER) = ?',
         f'CAST("Month" AS INTEGER) IN {_in_clause(months)}',
         # Exclude semi-finished CRC (20CRC) — keep finished coated products
         '"Material" NOT LIKE \'20CRC%\'',
     ]
-    params: list = [year] + months
+    params: list = ["1000", year] + months
 
     if plant:
         conds.append('"Plant" = ?')
@@ -391,11 +393,12 @@ def _query_tb_amounts(
     Returns None on query error.
     """
     conds = [
+        "company_code = ?",
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
     ]
-    params: list = [year] + months
+    params: list = ["1000", year] + months
 
     if cc_prefix:
         conds.append('CAST("Cost Center" AS VARCHAR) LIKE ?')
@@ -1010,7 +1013,8 @@ def get_pnl(
                               OR CAST("G/L Account" AS VARCHAR) LIKE '532%')
                     THEN net_amount ELSE 0 END) AS conv_cost
             FROM v_gl
-            WHERE CAST(Year AS INTEGER) = ?
+            WHERE company_code = ?
+              AND CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}
               AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
               AND CAST(CAST("G/L Account" AS DOUBLE) AS BIGINT) NOT IN {excl_ph}
@@ -1031,7 +1035,7 @@ def get_pnl(
             GROUP BY Month
             ORDER BY Month
             """,
-            [year] + months + excl_ints,
+            ["1000", year] + months + excl_ints,
         )
     except Exception:
         cost_df = None

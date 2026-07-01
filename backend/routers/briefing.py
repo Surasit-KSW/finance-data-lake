@@ -134,11 +134,12 @@ def _query_gp_mtd(year: int, month: int) -> dict:
 def _query_prod_volume_mtd(year: int, month: int, plant: str | None = None) -> float:
     """Total finished-goods production volume in MT for year/month."""
     conds = [
+        'company_code = ?',
         'CAST("Year" AS INTEGER) = ?',
         'CAST("Month" AS INTEGER) = ?',
         '"Material" NOT LIKE \'20CRC%\'',   # exclude semi-finished CRC
     ]
-    params: list = [year, month]
+    params: list = ["1000", year, month]
     if plant:
         conds.append('"Plant" = ?')
         params.append(plant)
@@ -169,11 +170,12 @@ def _query_gl_balance(year: int, month: int, account_prefix: str, ytd: bool = Tr
             f"""
             SELECT SUM(net_amount) AS balance
             FROM v_gl
-            WHERE CAST(Year AS INTEGER) = ?
+            WHERE company_code = ?
+              AND CAST(Year AS INTEGER) = ?
               AND {month_cond}
               AND CAST("G/L Account" AS VARCHAR) LIKE ?
             """,
-            [year, month, f"{account_prefix}%"],
+            ["1000", year, month, f"{account_prefix}%"],
         )
         return _safe_float(df.iloc[0]["balance"]) if not df.empty else 0.0
     except Exception:
@@ -184,8 +186,8 @@ def _query_gl_entry_count(year: int, month: int) -> int:
     """Count of GL entries for year/month (all accounts)."""
     try:
         df = query_df(
-            "SELECT COUNT(*) AS cnt FROM v_gl WHERE CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) = ?",
-            [year, month],
+            "SELECT COUNT(*) AS cnt FROM v_gl WHERE company_code = ? AND CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) = ?",
+            ["1000", year, month],
         )
         return int(_safe_float(df.iloc[0]["cnt"])) if not df.empty else 0
     except Exception:
@@ -209,12 +211,13 @@ def _query_plant_unit_costs(year: int, month: int) -> dict[str, dict]:
                 SUM("Actual GR QTY")  / 1000.0      AS vol_mt,
                 SUM("Actual GR Amount")              AS total_cost
             FROM v_production
-            WHERE CAST("Year" AS INTEGER) = ?
+            WHERE company_code = ?
+              AND CAST("Year" AS INTEGER) = ?
               AND CAST("Month" AS INTEGER) = ?
               AND "Material" NOT LIKE '20CRC%'
             GROUP BY "Plant"
             """,
-            [year, month],
+            ["1000", year, month],
         )
     except Exception:
         return {}
@@ -522,11 +525,12 @@ def get_alerts(date_param: str = Query(..., alias="date", description="Alert dat
             # Check if there are any GL cost entries for this plant
             cc_prefix = PLANT_CC_PREFIX.get(plant)
             conds = [
+                "company_code = ?",
                 "CAST(Year AS INTEGER) = ?",
                 "CAST(Month AS INTEGER) = ?",
                 "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
             ]
-            params: list = [year, month]
+            params: list = ["1000", year, month]
             if cc_prefix:
                 conds.append("CAST(\"Cost Center\" AS VARCHAR) LIKE ?")
                 params.append(f"{cc_prefix}%")
