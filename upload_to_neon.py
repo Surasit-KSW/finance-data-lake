@@ -264,7 +264,9 @@ def upload_gl(month: int = None, year: int = None):
 
     if month and year:
         # Upsert mode
-        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        m_col = pd.to_numeric(df["Month"], errors="coerce").fillna(0).astype(int)
+        y_col = pd.to_numeric(df["Year"],  errors="coerce").fillna(0).astype(int)
+        df = df[(m_col == month) & (y_col == year)]
         print(f"   📊 {len(df):,} rows (month={month} year={year})")
         if df.empty:
             print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
@@ -308,7 +310,9 @@ def upload_gl_summary(month: int = None, year: int = None):
     df = pd.read_parquet(src)
 
     if month and year:
-        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        m_col = pd.to_numeric(df["Month"], errors="coerce").fillna(0).astype(int)
+        y_col = pd.to_numeric(df["Year"],  errors="coerce").fillna(0).astype(int)
+        df = df[(m_col == month) & (y_col == year)]
         print(f"   📊 {len(df):,} rows (month={month} year={year})")
         if df.empty:
             print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
@@ -359,7 +363,9 @@ def upload_production(month: int = None, year: int = None):
     df = pd.concat(all_dfs, ignore_index=True)
 
     if month and year:
-        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        m_col = pd.to_numeric(df["Month"], errors="coerce").fillna(0).astype(int)
+        y_col = pd.to_numeric(df["Year"],  errors="coerce").fillna(0).astype(int)
+        df = df[(m_col == month) & (y_col == year)]
         print(f"\n   📊 {len(df):,} rows (month={month} year={year})")
         if df.empty:
             print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
