@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import pandas as pd
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .validators import SilverValidator
 
@@ -134,6 +136,7 @@ class BaseSilverETL(ABC):
 
         df_clean = self.transform(df_raw)
         df_final = self.add_company_code(df_clean)
+        df_final["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
         warnings = self.validator.validate(df_final, self.domain)
 
         self._save(df_final)

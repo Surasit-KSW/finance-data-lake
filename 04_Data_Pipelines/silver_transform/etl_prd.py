@@ -27,6 +27,8 @@ Process mapping (Work Center → Process):
      python 04_Data_Pipelines/silver_transform/etl_prd.py --year 2026
 """
 import os, sys, re, glob, argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -188,6 +190,7 @@ def run(target_year: int | None = None):
         combined = pd.concat(dfs, ignore_index=True)
         out_path = os.path.join(SILVER, f'master_prd_{yr}.parquet')
         os.makedirs(SILVER, exist_ok=True)
+        combined["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
         combined.to_parquet(out_path, index=False)
 
         # preview

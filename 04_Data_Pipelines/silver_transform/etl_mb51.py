@@ -34,6 +34,8 @@ Input material classification (by material code prefix):
      python 04_Data_Pipelines/silver_transform/etl_mb51.py --year 2026
 """
 import os, sys, re, glob, argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -210,6 +212,7 @@ def run(target_year: int | None = None):
 
         out_path = os.path.join(SILVER, f'master_mb51_{yr}.parquet')
         os.makedirs(SILVER, exist_ok=True)
+        agg["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
         agg.to_parquet(out_path, index=False)
 
         pd.options.display.float_format = '{:,.0f}'.format

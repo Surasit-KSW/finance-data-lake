@@ -1,5 +1,7 @@
 import glob
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -84,6 +86,7 @@ summary_df = df.groupby(['Year', 'Month', 'GL_Group', 'G/L Account']).agg({
 summary_df.rename(columns={'G/L Account: Long Text': 'GL_Name'}, inplace=True)
 summary_df['GL_Name'] = summary_df['GL_Name'].fillna('Unknown')
 
+summary_df["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
 print(f"💾 กำลังบันทึกไฟล์ Gold Data ไปที่: {output_file}")
 summary_df.to_parquet(output_file, engine='pyarrow', index=False)
 

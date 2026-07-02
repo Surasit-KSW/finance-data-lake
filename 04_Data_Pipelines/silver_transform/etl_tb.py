@@ -10,6 +10,8 @@ Usage:
 import sys
 import re
 import argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import pandas as pd
 import openpyxl
@@ -117,6 +119,7 @@ def run(year_filter: int = None):
     combined["month"] = combined["month"].astype(int)
     combined["closing_balance"] = combined["closing_balance"].astype(float)
 
+    combined["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
     combined.to_parquet(OUTPUT_FILE, index=False)
 
     print(f"\n  Saved: {OUTPUT_FILE.name}  ({len(combined):,} rows, {len(all_frames)} months)")
