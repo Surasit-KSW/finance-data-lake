@@ -126,8 +126,45 @@ def run(year_filter: int = None):
     print(f"{'='*55}\n")
 
 
+def upsert_file(file_path: Path) -> None:
+    """Upsert เฉพาะไฟล์เดียว — ลบ rows เดิมของเดือนนั้น แล้ว append ใหม่"""
+    parsed = parse_filename(file_path.name)
+    if not parsed:
+        print(f"  ❌ ไม่รู้จักชื่อไฟล์: {file_path.name}")
+        return
+    month, year = parsed
+    print(f"  📄 Upsert: {file_path.name} (month={month} year={year})")
+
+    df_new = read_tb_file(file_path, month, year)
+    if df_new.empty:
+        print(f"  ⚠️  ไม่มีข้อมูลใน {file_path.name}")
+        return
+
+    if OUTPUT_FILE.exists():
+        df_existing = pd.read_parquet(OUTPUT_FILE)
+        mask = (df_existing["year"].astype(int) == year) & (df_existing["month"].astype(int) == month)
+        dropped = mask.sum()
+        df_existing = df_existing[~mask]
+        if dropped:
+            print(f"  🗑  ลบ {dropped:,} rows เดิม (month={month} year={year})")
+    else:
+        df_existing = pd.DataFrame()
+
+    combined = pd.concat([df_existing, df_new], ignore_index=True)
+    combined["year"]            = combined["year"].astype(int)
+    combined["month"]           = combined["month"].astype(int)
+    combined["closing_balance"] = combined["closing_balance"].astype(float)
+    combined["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
+    combined.to_parquet(OUTPUT_FILE, index=False)
+    print(f"  💾 Saved: {OUTPUT_FILE.name} ({len(combined):,} rows total)")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TB Silver ETL")
     parser.add_argument("--year", type=int, default=None)
+    parser.add_argument("--file", type=Path, default=None, help="Upsert เฉพาะไฟล์นี้ (ไม่ rebuild ทั้งหมด)")
     args = parser.parse_args()
-    run(year_filter=args.year)
+    if args.file:
+        upsert_file(args.file)
+    else:
+        run(year_filter=args.year)

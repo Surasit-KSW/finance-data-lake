@@ -155,9 +155,10 @@ def _run(script: Path, extra_args: list[str] = None) -> bool:
     return True
 
 
-def run_direct(folder: str, year: str | None) -> bool:
+def run_direct(folder: str, year: str | None, file_path: Path | None = None) -> bool:
     """
     รัน Silver ETL ที่ตรงกับ folder → (ถ้าต้องการ) Gold → init_duckdb
+    ถ้ามี file_path: upsert เฉพาะไฟล์นั้น (เร็วกว่า rebuild ทั้งหมด)
     Return True ถ้าทุก step สำเร็จ
     """
     etl_script = FOLDER_TO_ETL.get(folder)
@@ -171,8 +172,14 @@ def run_direct(folder: str, year: str | None) -> bool:
         log.error(f"[DIRECT] ไม่พบ script: {script_path}")
         return False
 
-    # Silver ETL
-    args = ["--year", year] if year else []
+    # Silver ETL — upsert เฉพาะไฟล์ที่เปลี่ยน ถ้าระบุมา
+    if file_path and file_path.exists():
+        log.info(f"[DIRECT] upsert mode: {file_path.name}")
+        args = ["--file", str(file_path)]
+    else:
+        log.info(f"[DIRECT] rebuild mode: year={year}")
+        args = ["--year", year] if year else []
+
     ok = _run(script_path, args)
     if not ok:
         return False
@@ -233,30 +240,23 @@ class BronzeHandler(FileSystemEventHandler):
         now     = time.time()
         to_fire = [p for p, t in self._pending.items() if t <= now]
 
-        # Group by (folder, year) — trigger แค่ครั้งเดียวต่อ folder แม้ไฟล์เปลี่ยนหลายไฟล์
-        jobs: dict[tuple[str, str | None], str] = {}
         for path in to_fire:
             del self._pending[path]
-            folder = self._detect_folder(Path(path))
+            file_path = Path(path)
+            folder = self._detect_folder(file_path)
             if not folder:
                 continue
-            year = _extract_year(Path(path).name)
-            key  = (folder, year)
-            if key not in jobs:
-                jobs[key] = path
+            year = _extract_year(file_path.name)
+            log.info(f"📂 ตรวจพบ: {file_path.name}  (folder={folder} year={year})")
+            self._dispatch(folder, year, file_path)
 
-        for (folder, year), path in jobs.items():
-            log.info(f"📂 ตรวจพบ: {Path(path).name}  (folder={folder} year={year})")
-            self._dispatch(folder, year)
-
-    def _dispatch(self, folder: str, year: str | None) -> None:
+    def _dispatch(self, folder: str, year: str | None, file_path: Path | None = None) -> None:
         """เลือก mode: API (ถ้าเปิดอยู่) → fallback Direct"""
         use_direct = self.force_direct
 
         if not use_direct:
             if api_is_alive(self.api_url):
                 log.info(f"[MODE] API mode → {self.api_url}")
-                # map folder → api domain
                 domain_map = {
                     "gl": "gl", "cost_center": "gl", "tb_snapshots": "gl",
                     "inventory": "gl", "sales": "sales",
@@ -283,7 +283,7 @@ class BronzeHandler(FileSystemEventHandler):
                 use_direct = True
 
         if use_direct:
-            ok = run_direct(folder, year)
+            ok = run_direct(folder, year, file_path=file_path)
             if ok:
                 log.info(f"✅ [{folder}] ETL + DuckDB refresh เสร็จแล้ว")
             else:

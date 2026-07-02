@@ -101,13 +101,62 @@ class GLTransformETL(BaseSilverETL):
         super()._save(df)
 
 
+def upsert_file(file_path: Path, company_name: str = "AMC") -> None:
+    """Upsert เฉพาะไฟล์เดียว — ลบ rows เดิมของเดือนนั้น แล้ว append ใหม่"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    registry = CompanyRegistry(
+        config_path=PROJECT_ROOT / "08_Config" / "company_registry.yaml",
+        project_root=PROJECT_ROOT,
+    )
+    company = registry.get(company_name)
+    etl = GLTransformETL(
+        company_code=company["company_code"],
+        bronze_gl_path=company["bronze_paths"]["gl"],
+        silver_path=PROJECT_ROOT / "02_Silver_Cleaned",
+    )
+
+    print(f"  📄 Upsert GL: {file_path.name}")
+    df_raw = pd.read_excel(file_path, dtype=str)
+    df_clean = etl.transform(df_raw)
+    df_final = etl.add_company_code(df_clean)
+    df_final["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
+
+    # หา month/year จากข้อมูล
+    year  = int(df_final["Year"].dropna().astype(int).max())
+    month = int(df_final["Month"].dropna().astype(int).max())
+    print(f"     detected month={month} year={year} ({len(df_final):,} rows)")
+
+    out = etl._output_path()
+    if out.exists():
+        df_existing = pd.read_parquet(out)
+        mask = (df_existing["Year"].astype(int) == year) & (df_existing["Month"].astype(int) == month)
+        dropped = mask.sum()
+        df_existing = df_existing[~mask]
+        if dropped:
+            print(f"  🗑  ลบ {dropped:,} rows เดิม (month={month} year={year})")
+    else:
+        df_existing = pd.DataFrame()
+
+    combined = pd.concat([df_existing, df_final], ignore_index=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_parquet(out, engine="pyarrow", index=False)
+    print(f"  💾 Saved: {out.name} ({len(combined):,} rows total)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="GL ETL — Bronze -> Silver")
     parser.add_argument("--company", default="AMC", help="Company name (default: AMC)")
     parser.add_argument("--year", type=int, help="Process specific year only")
+    parser.add_argument("--file", type=Path, default=None, help="Upsert เฉพาะไฟล์นี้ (ไม่ rebuild ทั้งหมด)")
     # Legacy positional arg support: python etl_gl.py 2026
     parser.add_argument("year_pos", nargs="?", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    if args.file:
+        upsert_file(args.file, company_name=args.company)
+        return
 
     year = args.year or args.year_pos
 

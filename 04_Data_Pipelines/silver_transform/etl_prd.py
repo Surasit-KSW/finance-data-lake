@@ -211,8 +211,45 @@ def run(target_year: int | None = None):
         print(f'\n💾 บันทึกแล้ว: {out_path}')
 
 
+def upsert_file(file_path: str) -> None:
+    """Upsert เฉพาะไฟล์เดียว — ลบ rows เดิมของเดือนนั้น แล้ว append ใหม่"""
+    fname = os.path.basename(file_path)
+    m = re.match(r'prd_(\d{4})(\d{2})\.xlsx', fname, re.IGNORECASE)
+    if not m:
+        print(f"  ❌ ไม่รู้จักชื่อไฟล์: {fname}")
+        return
+    year, month = int(m.group(1)), int(m.group(2))
+    print(f"  📄 Upsert: {fname} (month={month} year={year})")
+
+    df_new = _parse_file(file_path)
+    if df_new is None or df_new.empty:
+        print(f"  ⚠️  ไม่มีข้อมูลใน {fname}")
+        return
+
+    out_path = os.path.join(SILVER, f'master_prd_{year}.parquet')
+    if os.path.exists(out_path):
+        df_existing = pd.read_parquet(out_path)
+        mask = (df_existing["Year"].astype(int) == year) & (df_existing["Month"].astype(int) == month)
+        dropped = mask.sum()
+        df_existing = df_existing[~mask]
+        if dropped:
+            print(f"  🗑  ลบ {dropped:,} rows เดิม (month={month} year={year})")
+    else:
+        df_existing = pd.DataFrame()
+
+    combined = pd.concat([df_existing, df_new], ignore_index=True)
+    os.makedirs(SILVER, exist_ok=True)
+    combined["loaded_at"] = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S +07")
+    combined.to_parquet(out_path, index=False)
+    print(f"  💾 Saved: master_prd_{year}.parquet ({len(combined):,} rows total)")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--year', type=int, default=None)
+    parser.add_argument('--file', type=str, default=None, help='Upsert เฉพาะไฟล์นี้ (ไม่ rebuild ทั้งหมด)')
     args = parser.parse_args()
-    run(args.year)
+    if args.file:
+        upsert_file(args.file)
+    else:
+        run(args.year)
