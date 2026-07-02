@@ -157,7 +157,7 @@ def _run(script: Path, extra_args: list[str] = None) -> bool:
 
 def run_direct(folder: str, year: str | None, file_path: Path | None = None) -> bool:
     """
-    รัน Silver ETL ที่ตรงกับ folder → (ถ้าต้องการ) Gold → init_duckdb
+    รัน Silver ETL ที่ตรงกับ folder → (ถ้าต้องการ) Gold → init_duckdb → Neon upsert
     ถ้ามี file_path: upsert เฉพาะไฟล์นั้น (เร็วกว่า rebuild ทั้งหมด)
     Return True ถ้าทุก step สำเร็จ
     """
@@ -175,12 +175,12 @@ def run_direct(folder: str, year: str | None, file_path: Path | None = None) -> 
     # Silver ETL — upsert เฉพาะไฟล์ที่เปลี่ยน ถ้าระบุมา
     if file_path and file_path.exists():
         log.info(f"[DIRECT] upsert mode: {file_path.name}")
-        args = ["--file", str(file_path)]
+        etl_args = ["--file", str(file_path)]
     else:
         log.info(f"[DIRECT] rebuild mode: year={year}")
-        args = ["--year", year] if year else []
+        etl_args = ["--year", year] if year else []
 
-    ok = _run(script_path, args)
+    ok = _run(script_path, etl_args)
     if not ok:
         return False
 
@@ -198,6 +198,18 @@ def run_direct(folder: str, year: str | None, file_path: Path | None = None) -> 
     if init_script.exists():
         _run(init_script)
 
+    # Neon upsert — extract month จาก filename ถ้าทำได้
+    neon_script = PROJECT_ROOT / "upload_to_neon.py"
+    if neon_script.exists():
+        month = _extract_month(file_path.name) if file_path else None
+        if month and year:
+            neon_args = ["--domain", "all", "--month", month, "--year", year]
+            log.info(f"[NEON] upsert month={month}/{year}")
+        else:
+            neon_args = ["--domain", "all"]
+            log.info("[NEON] full rebuild")
+        _run(neon_script, neon_args)
+
     return True
 
 
@@ -209,6 +221,13 @@ def _extract_year(filename: str) -> str | None:
     import re
     m = re.search(r"(20\d{2})", filename)
     return m.group(1) if m else None
+
+
+def _extract_month(filename: str) -> str | None:
+    """หาเดือน 2 หลักจากชื่อไฟล์ เช่น gl_202606.XLSX → '6'"""
+    import re
+    m = re.search(r"20\d{2}(\d{2})", filename)
+    return str(int(m.group(1))) if m else None
 
 
 class BronzeHandler(FileSystemEventHandler):

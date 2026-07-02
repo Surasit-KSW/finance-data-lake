@@ -3,10 +3,15 @@ upload_to_neon.py — Upload Silver/Gold parquet data to Neon PostgreSQL
 =======================================================================
 สร้าง tables v_gl, v_gl_summary ใน Neon แล้ว upsert ข้อมูลจาก parquet files
 
-รัน: python upload_to_neon.py
-     python upload_to_neon.py --domain gl          # GL only
-     python upload_to_neon.py --domain gl_summary  # Gold summary only
-     python upload_to_neon.py --domain all         # ทั้งหมด (default)
+Mode การทำงาน:
+  Full rebuild (default):   DROP TABLE → CREATE → INSERT ทั้งหมด
+  Upsert month (--month):   DELETE WHERE month+year → INSERT เฉพาะเดือนนั้น
+
+รัน:
+  python upload_to_neon.py                              # full rebuild ทุก domain
+  python upload_to_neon.py --domain gl                 # full rebuild GL only
+  python upload_to_neon.py --domain gl --month 6 --year 2026   # upsert เดือน 6
+  python upload_to_neon.py --domain all --month 6 --year 2026  # upsert ทุก domain
 
 ต้องการ DATABASE_URL ใน .env (Neon connection string)
 """
@@ -31,7 +36,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 SILVER = os.path.join(PROJECT_ROOT, "02_Silver_Cleaned")
 GOLD   = os.path.join(PROJECT_ROOT, "03_Gold_DataMarts")
 
-BATCH_SIZE = 5000  # rows per INSERT batch
+BATCH_SIZE = 5000
 
 
 # ─── DB helpers ──────────────────────────────────────────────────────────────
@@ -50,9 +55,28 @@ def execute_ddl(sql: str):
         conn.close()
 
 
-def truncate_table(table: str):
-    execute_ddl(f'TRUNCATE TABLE "{table}"')
-    print(f"   🗑️  Truncated: {table}")
+def table_exists(table: str) -> bool:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_name = %s",
+                (table,),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def delete_month(conn, table: str, year_col: str, month_col: str, year: int, month: int):
+    """ลบ rows ของเดือนนั้นออกก่อน insert ใหม่"""
+    sql = f'DELETE FROM "{table}" WHERE "{year_col}" = %s AND "{month_col}" = %s'
+    with conn.cursor() as cur:
+        cur.execute(sql, (year, month))
+        deleted = cur.rowcount
+    conn.commit()
+    if deleted:
+        print(f"   🗑️  ลบ {deleted:,} rows เดิม ({table} month={month} year={year})")
 
 
 def insert_batch(conn, table: str, columns: list[str], rows: list[tuple]):
@@ -62,6 +86,18 @@ def insert_batch(conn, table: str, columns: list[str], rows: list[tuple]):
     with conn.cursor() as cur:
         psycopg2.extras.execute_batch(cur, sql, rows, page_size=BATCH_SIZE)
     conn.commit()
+
+
+def upload_rows(conn, table: str, cols: list[str], records: list[tuple], label: str = ""):
+    total = len(records)
+    tag   = f" [{label}]" if label else ""
+    print(f"   ⬆️  Uploading {total:,} rows{tag}...")
+    for i in range(0, total, BATCH_SIZE):
+        batch = records[i:i + BATCH_SIZE]
+        insert_batch(conn, table, cols, batch)
+        pct = min(100, int((i + len(batch)) / total * 100))
+        print(f"      {pct:3d}% ({i + len(batch):,}/{total:,})", end="\r")
+    print()
 
 
 # ─── Schema ───────────────────────────────────────────────────────────────────
@@ -87,10 +123,6 @@ CREATE TABLE v_gl (
     "Assignment"               TEXT
 );
 """
-# Column naming rules:
-#   - lowercase (unquoted) for valid identifiers: year, month, net_amount, source_file
-#     → SQL can use any case — Postgres normalizes unquoted to lowercase → matches
-#   - quoted for special-char columns: "G/L Account", "Posting Date", etc.
 
 DDL_V_GL_SUMMARY = """
 DROP TABLE IF EXISTS v_gl_summary;
@@ -119,97 +151,153 @@ CREATE TABLE v_production (
 """
 
 
-# ─── Upload: v_gl ─────────────────────────────────────────────────────────────
+# ─── Row builders ─────────────────────────────────────────────────────────────
 
-def upload_gl():
-    files = sorted(glob.glob(os.path.join(SILVER, "Master_GL_*.parquet")))
-    if not files:
-        print("❌ ไม่พบ Master_GL_*.parquet ใน Silver layer")
-        return
+def _clean_str(s):
+    if pd.isna(s): return None
+    s = str(s)
+    return None if s in ("nan", "None", "") else s
 
-    src = files[-1]
-    print(f"\n📂 อ่าน: {os.path.basename(src)}")
-    df = pd.read_parquet(src)
+def _clean_float_as_str(v):
+    if pd.isna(v): return None
+    try: return str(int(float(v)))
+    except Exception: return _clean_str(v)
 
-    # ── Normalize columns ────────────────────────────────────────────────────
-    def clean_str(s):
-        if pd.isna(s): return None
-        s = str(s)
-        return None if s in ("nan", "None", "") else s
+def _clean_int(v):
+    if pd.isna(v): return None
+    try: return int(float(v))
+    except Exception: return None
 
-    def clean_float_as_str(v):
-        """Convert 4111010.0 → '4111010'"""
-        if pd.isna(v): return None
-        try:
-            return str(int(float(v)))
-        except Exception:
-            return clean_str(v)
+def _clean_date(v):
+    if pd.isna(v): return None
+    try: return pd.Timestamp(v).date()
+    except Exception: return None
 
-    def clean_int(v):
-        if pd.isna(v): return None
-        try: return int(float(v))
-        except Exception: return None
+def _clean_float(v):
+    if pd.isna(v): return None
+    try: return float(v)
+    except Exception: return None
 
-    def clean_date(v):
-        if pd.isna(v): return None
-        try: return pd.Timestamp(v).date()
-        except Exception: return None
 
-    def clean_float(v):
-        if pd.isna(v): return None
-        try: return float(v)
-        except Exception: return None
-
-    print(f"   📊 {len(df):,} rows — normalizing...")
-
-    records = []
-    for _, row in df.iterrows():
-        records.append((
-            clean_float_as_str(row.get("G/L Account")),
-            clean_str(row.get("G/L Account: Long Text")),
-            clean_float(row.get("Net_Amount")),
-            clean_int(row.get("Year")),
-            clean_int(row.get("Month")),
-            clean_date(row.get("Posting Date")),
-            clean_float_as_str(row.get("Document Number")),
-            clean_str(row.get("Text")),
-            clean_float_as_str(row.get("Cost Center")),
-            clean_str(row.get("Cost Center: Long Text")),
-            clean_str(row.get("Cost Center: Short Text")),
-            clean_str(row.get("Source_File")),
-            clean_float_as_str(row.get("Company Code")),
-            clean_str(row.get("Document type")),
-            clean_str(row.get("Reference")),
-            clean_str(row.get("Assignment")),
-        ))
-
+def _build_gl_records(df: pd.DataFrame) -> tuple[list, list[str]]:
     cols = [
         "G/L Account", "G/L Account: Long Text", "net_amount",
         "year", "month", "Posting Date", "Document Number", "Text",
         "Cost Center", "Cost Center: Long Text", "Cost Center: Short Text",
         "source_file", "Company Code", "Document type", "Reference", "Assignment",
     ]
+    records = [
+        (
+            _clean_float_as_str(row.get("G/L Account")),
+            _clean_str(row.get("G/L Account: Long Text")),
+            _clean_float(row.get("Net_Amount")),
+            _clean_int(row.get("Year")),
+            _clean_int(row.get("Month")),
+            _clean_date(row.get("Posting Date")),
+            _clean_float_as_str(row.get("Document Number")),
+            _clean_str(row.get("Text")),
+            _clean_float_as_str(row.get("Cost Center")),
+            _clean_str(row.get("Cost Center: Long Text")),
+            _clean_str(row.get("Cost Center: Short Text")),
+            _clean_str(row.get("Source_File")),
+            _clean_float_as_str(row.get("Company Code")),
+            _clean_str(row.get("Document type")),
+            _clean_str(row.get("Reference")),
+            _clean_str(row.get("Assignment")),
+        )
+        for _, row in df.iterrows()
+    ]
+    return records, cols
 
-    print("   🏗️  สร้าง/recreate table v_gl...")
-    execute_ddl(DDL_V_GL)
 
-    print(f"   ⬆️  Uploading {len(records):,} rows in batches of {BATCH_SIZE}...")
-    conn = get_conn()
-    try:
-        for i in range(0, len(records), BATCH_SIZE):
-            batch = records[i:i+BATCH_SIZE]
-            insert_batch(conn, "v_gl", cols, batch)
-            pct = min(100, int((i + len(batch)) / len(records) * 100))
-            print(f"      {pct:3d}% ({i + len(batch):,}/{len(records):,})", end="\r")
-    finally:
-        conn.close()
+def _build_gl_summary_records(df: pd.DataFrame) -> tuple[list, list[str]]:
+    cols = ["year", "month", "gl_group", "G/L Account", "net_amount", "gl_name"]
+    records = [
+        (
+            _clean_int(row.get("Year")),
+            _clean_int(row.get("Month")),
+            _clean_str(row.get("GL_Group")),
+            _clean_float_as_str(row.get("G/L Account")),
+            _clean_float(row.get("Net_Amount")),
+            _clean_str(row.get("GL_Name")),
+        )
+        for _, row in df.iterrows()
+    ]
+    return records, cols
 
-    print(f"\n   ✅ v_gl uploaded: {len(records):,} rows")
+
+def _build_production_records(df: pd.DataFrame) -> tuple[list, list[str]]:
+    cols = [
+        "Material", "Description (EN)", "Plant", "Year", "Month",
+        "Actual GR QTY", "Actual GR Amount", "Source_File",
+    ]
+    records = [
+        (
+            _clean_str(row.get("Material")),
+            _clean_str(row.get("Description (EN)")),
+            _clean_str(row.get("Plant")),
+            _clean_int(row.get("Year")),
+            _clean_int(row.get("Month")),
+            _clean_float(row.get("Actual GR QTY")),
+            _clean_float(row.get("Actual GR Amount")),
+            _clean_str(row.get("Source_File")),
+        )
+        for _, row in df.iterrows()
+    ]
+    return records, cols
 
 
-# ─── Upload: v_gl_summary ────────────────────────────────────────────────────
+# ─── Upload: v_gl ─────────────────────────────────────────────────────────────
 
-def upload_gl_summary():
+def upload_gl(month: int = None, year: int = None):
+    files = sorted(glob.glob(os.path.join(SILVER, "master_gl_*.parquet")))
+    if not files:
+        # fallback legacy name
+        files = sorted(glob.glob(os.path.join(SILVER, "Master_GL_*.parquet")))
+    if not files:
+        print("❌ ไม่พบ master_gl_*.parquet ใน Silver layer")
+        return
+
+    src = files[-1]
+    print(f"\n📂 อ่าน: {os.path.basename(src)}")
+    df = pd.read_parquet(src)
+
+    if month and year:
+        # Upsert mode
+        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        print(f"   📊 {len(df):,} rows (month={month} year={year})")
+        if df.empty:
+            print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
+            return
+        records, cols = _build_gl_records(df)
+        conn = get_conn()
+        try:
+            if table_exists("v_gl"):
+                delete_month(conn, "v_gl", "year", "month", year, month)
+            else:
+                print("   🏗️  สร้าง table v_gl ใหม่ (ยังไม่มี)...")
+                execute_ddl(DDL_V_GL)
+            upload_rows(conn, "v_gl", cols, records, label=f"month={month}/{year}")
+        finally:
+            conn.close()
+    else:
+        # Full rebuild
+        print(f"   📊 {len(df):,} rows — full rebuild")
+        records, cols = _build_gl_records(df)
+        print("   🏗️  DROP + CREATE table v_gl...")
+        execute_ddl(DDL_V_GL)
+        conn = get_conn()
+        try:
+            upload_rows(conn, "v_gl", cols, records)
+        finally:
+            conn.close()
+
+    print(f"   ✅ v_gl: {len(records):,} rows {'upserted' if month else 'uploaded'}")
+
+
+# ─── Upload: v_gl_summary ─────────────────────────────────────────────────────
+
+def upload_gl_summary(month: int = None, year: int = None):
     files = sorted(glob.glob(os.path.join(GOLD, "Summary_GL_*.parquet")))
     if not files:
         print("❌ ไม่พบ Summary_GL_*.parquet ใน Gold layer")
@@ -218,65 +306,40 @@ def upload_gl_summary():
     src = files[-1]
     print(f"\n📂 อ่าน: {os.path.basename(src)}")
     df = pd.read_parquet(src)
-    print(f"   📊 {len(df):,} rows")
 
-    def clean_int(v):
-        if pd.isna(v): return None
-        try: return int(float(v))
-        except Exception: return None
+    if month and year:
+        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        print(f"   📊 {len(df):,} rows (month={month} year={year})")
+        if df.empty:
+            print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
+            return
+        records, cols = _build_gl_summary_records(df)
+        conn = get_conn()
+        try:
+            if table_exists("v_gl_summary"):
+                delete_month(conn, "v_gl_summary", "year", "month", year, month)
+            else:
+                execute_ddl(DDL_V_GL_SUMMARY)
+            upload_rows(conn, "v_gl_summary", cols, records, label=f"month={month}/{year}")
+        finally:
+            conn.close()
+    else:
+        print(f"   📊 {len(df):,} rows — full rebuild")
+        records, cols = _build_gl_summary_records(df)
+        print("   🏗️  DROP + CREATE table v_gl_summary...")
+        execute_ddl(DDL_V_GL_SUMMARY)
+        conn = get_conn()
+        try:
+            upload_rows(conn, "v_gl_summary", cols, records)
+        finally:
+            conn.close()
 
-    def clean_str(s):
-        if pd.isna(s): return None
-        s = str(s)
-        return None if s in ("nan", "None", "") else s
-
-    def clean_float_as_str(v):
-        if pd.isna(v): return None
-        try: return str(int(float(v)))
-        except Exception: return clean_str(v)
-
-    def clean_float(v):
-        if pd.isna(v): return None
-        try: return float(v)
-        except Exception: return None
-
-    records = [
-        (
-            clean_int(row.get("Year")),
-            clean_int(row.get("Month")),
-            clean_str(row.get("GL_Group")),
-            clean_float_as_str(row.get("G/L Account")),
-            clean_float(row.get("Net_Amount")),
-            clean_str(row.get("GL_Name")),
-        )
-        for _, row in df.iterrows()
-    ]
-
-    cols = ["year", "month", "gl_group", "G/L Account", "net_amount", "gl_name"]
-
-    print("   🏗️  สร้าง/recreate table v_gl_summary...")
-    execute_ddl(DDL_V_GL_SUMMARY)
-
-    print(f"   ⬆️  Uploading {len(records):,} rows...")
-    conn = get_conn()
-    try:
-        insert_batch(conn, "v_gl_summary", cols, records)
-    finally:
-        conn.close()
-
-    print(f"   ✅ v_gl_summary uploaded: {len(records):,} rows")
+    print(f"   ✅ v_gl_summary: {len(records):,} rows {'upserted' if month else 'uploaded'}")
 
 
-# ─── Upload: v_production ────────────────────────────────────────────────────
+# ─── Upload: v_production ─────────────────────────────────────────────────────
 
-def upload_production():
-    """Upload Silver production parquet files → v_production table in Neon.
-
-    Reads all master_production_*.parquet files and uploads the slim set of
-    columns needed for Cost Ledger unit-cost queries:
-      Material, Description (EN), Plant, Year, Month,
-      Actual GR QTY, Actual GR Amount, Source_File
-    """
+def upload_production(month: int = None, year: int = None):
     files = sorted(glob.glob(os.path.join(SILVER, "master_production_*.parquet")))
     if not files:
         print("❌ ไม่พบ master_production_*.parquet ใน Silver layer")
@@ -289,63 +352,40 @@ def upload_production():
 
     all_dfs = []
     for f in files:
-        print(f"\n📂 อ่าน: {os.path.basename(f)}")
-        df = pd.read_parquet(f, columns=[c for c in SLIM_COLS if c in pd.read_parquet(f, columns=None).columns])
-        all_dfs.append(df)
-        print(f"   📊 {len(df):,} rows")
+        _df = pd.read_parquet(f)
+        avail = [c for c in SLIM_COLS if c in _df.columns]
+        all_dfs.append(_df[avail])
 
-    combined = pd.concat(all_dfs, ignore_index=True)
-    print(f"\n   📊 รวม {len(combined):,} rows จาก {len(files)} ไฟล์")
+    df = pd.concat(all_dfs, ignore_index=True)
 
-    def clean_str(s):
-        if pd.isna(s): return None
-        s = str(s)
-        return None if s in ("nan", "None", "") else s
+    if month and year:
+        df = df[(df["Month"].astype(int) == month) & (df["Year"].astype(int) == year)]
+        print(f"\n   📊 {len(df):,} rows (month={month} year={year})")
+        if df.empty:
+            print("   ⚠️  ไม่มีข้อมูลสำหรับเดือนนี้")
+            return
+        records, cols = _build_production_records(df)
+        conn = get_conn()
+        try:
+            if table_exists("v_production"):
+                delete_month(conn, "v_production", "Year", "Month", year, month)
+            else:
+                execute_ddl(DDL_V_PRODUCTION)
+            upload_rows(conn, "v_production", cols, records, label=f"month={month}/{year}")
+        finally:
+            conn.close()
+    else:
+        print(f"\n   📊 {len(df):,} rows — full rebuild")
+        records, cols = _build_production_records(df)
+        print("   🏗️  DROP + CREATE table v_production...")
+        execute_ddl(DDL_V_PRODUCTION)
+        conn = get_conn()
+        try:
+            upload_rows(conn, "v_production", cols, records)
+        finally:
+            conn.close()
 
-    def clean_int(v):
-        if pd.isna(v): return None
-        try: return int(float(v))
-        except Exception: return None
-
-    def clean_float(v):
-        if pd.isna(v): return None
-        try: return float(v)
-        except Exception: return None
-
-    records = [
-        (
-            clean_str(row.get("Material")),
-            clean_str(row.get("Description (EN)")),
-            clean_str(row.get("Plant")),
-            clean_int(row.get("Year")),
-            clean_int(row.get("Month")),
-            clean_float(row.get("Actual GR QTY")),
-            clean_float(row.get("Actual GR Amount")),
-            clean_str(row.get("Source_File")),
-        )
-        for _, row in combined.iterrows()
-    ]
-
-    cols = [
-        "Material", "Description (EN)", "Plant", "Year", "Month",
-        "Actual GR QTY", "Actual GR Amount", "Source_File",
-    ]
-
-    print("   🏗️  สร้าง/recreate table v_production...")
-    execute_ddl(DDL_V_PRODUCTION)
-
-    print(f"   ⬆️  Uploading {len(records):,} rows in batches of {BATCH_SIZE}...")
-    conn = get_conn()
-    try:
-        for i in range(0, len(records), BATCH_SIZE):
-            batch = records[i:i+BATCH_SIZE]
-            insert_batch(conn, "v_production", cols, batch)
-            pct = min(100, int((i + len(batch)) / len(records) * 100))
-            print(f"      {pct:3d}% ({i + len(batch):,}/{len(records):,})", end="\r")
-    finally:
-        conn.close()
-
-    print(f"\n   ✅ v_production uploaded: {len(records):,} rows")
+    print(f"   ✅ v_production: {len(records):,} rows {'upserted' if month else 'uploaded'}")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -353,21 +393,31 @@ def upload_production():
 def main():
     parser = argparse.ArgumentParser(description="Upload parquet → Neon PostgreSQL")
     parser.add_argument("--domain", choices=["gl", "gl_summary", "production", "all"], default="all")
+    parser.add_argument("--month", type=int, default=None, help="Upsert เฉพาะเดือนนี้ (1-12)")
+    parser.add_argument("--year",  type=int, default=None, help="ปี เช่น 2026 (ใช้คู่กับ --month)")
     args = parser.parse_args()
+
+    if args.month and not args.year:
+        print("❌ ต้องระบุ --year ด้วยเมื่อใช้ --month")
+        sys.exit(1)
+
+    mode = f"upsert month={args.month}/{args.year}" if args.month else "full rebuild"
 
     print("=" * 55)
     print("  Upload to Neon PostgreSQL")
-    print(f"  Target: {DATABASE_URL.split('@')[-1][:50]}")
+    print(f"  Target : {DATABASE_URL.split('@')[-1][:50]}")
+    print(f"  Mode   : {mode}")
+    print(f"  Domain : {args.domain}")
     print("=" * 55)
 
     if args.domain in ("gl", "all"):
-        upload_gl()
+        upload_gl(month=args.month, year=args.year)
 
     if args.domain in ("gl_summary", "all"):
-        upload_gl_summary()
+        upload_gl_summary(month=args.month, year=args.year)
 
     if args.domain in ("production", "all"):
-        upload_production()
+        upload_production(month=args.month, year=args.year)
 
     print("\n✅ เสร็จสิ้น — ข้อมูลพร้อมใช้งานบน Render/Vercel")
 
