@@ -409,3 +409,19 @@ def test_pnl_response_shape(mock_query_df):
     assert "rmCost" in row
     assert "convCost" in row
     assert "gp" in row
+
+
+# ─── Tests: Production column name ─────────────────────────────────────────────
+
+@patch("backend.routers.monitor.query_df")
+def test_monitor_production_volume_uses_gr_qty_column(mock_query_df):
+    """_query_production_volume in monitor.py must use GR_Qty (ETL-renamed column)."""
+    from backend.routers.monitor import _query_production_volume
+    mock_query_df.return_value = pd.DataFrame({
+        "Plant": ["1300"],
+        "total_qty_mt": [11_000.0],
+    })
+    _query_production_volume(year=2026, months=[7])
+    sql = mock_query_df.call_args[0][0]
+    assert '"GR_Qty"' in sql, f"Must use GR_Qty column, got: {sql}"
+    assert "Actual GR QTY" not in sql, "Must NOT use old raw SAP column name"

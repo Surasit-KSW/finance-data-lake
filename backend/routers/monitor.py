@@ -114,7 +114,7 @@ PLANT_LABELS: dict[str, str] = {
 ALL_PLANTS = ["1300", "1100", "1200"]
 
 # Column name for production output qty in v_production (MB52 actual GR qty)
-PROD_QTY_COL = "Actual GR QTY"
+PROD_QTY_COL = "GR_Qty"
 PROD_AMT_COL = "Actual GR Amount"
 
 
