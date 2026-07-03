@@ -147,7 +147,7 @@ def _query_prod_volume_mtd(year: int, month: int, plant: str | None = None) -> f
     try:
         df = query_df(
             f"""
-            SELECT SUM("Actual GR QTY") / 1000.0 AS total_mt
+            SELECT SUM("GR_Qty") / 1000.0 AS total_mt
             FROM v_production
             WHERE {' AND '.join(conds)}
             """,
@@ -208,7 +208,7 @@ def _query_plant_unit_costs(year: int, month: int) -> dict[str, dict]:
             """
             SELECT
                 "Plant"                              AS plant,
-                SUM("Actual GR QTY")  / 1000.0      AS vol_mt,
+                SUM("GR_Qty")  / 1000.0      AS vol_mt,
                 SUM("Actual GR Amount")              AS total_cost
             FROM v_production
             WHERE company_code = ?

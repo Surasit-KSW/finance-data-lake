@@ -323,6 +323,40 @@ def test_alerts_response_shape(mock_query_df):
 
 
 @patch("backend.routers.briefing.query_df")
+def test_prod_volume_uses_gr_qty_column(mock_query_df):
+    """_query_prod_volume_mtd must use GR_Qty column (ETL-renamed), not Actual GR QTY."""
+    mock_query_df.side_effect = [
+        _revenue_df(),
+        _gp_df(),
+        _prod_df(total_mt=11_000.0),
+        _gl_balance_df(),
+        _gl_balance_df(50_000_000.0),
+    ]
+    get_cfo_kpis(asOf="2026-07-03")
+    prod_call = mock_query_df.call_args_list[2]
+    sql = prod_call[0][0]
+    assert '"GR_Qty"' in sql, f"Must use GR_Qty column, got: {sql}"
+    assert "Actual GR QTY" not in sql, "Must NOT use old raw SAP column name"
+
+
+@patch("backend.routers.briefing.query_df")
+def test_plant_unit_costs_uses_gr_qty_column(mock_query_df):
+    """_query_plant_unit_costs must use GR_Qty column (ETL-renamed)."""
+    mock_query_df.side_effect = [
+        _plant_cost_df(),
+        _empty_df("total_mt"),  # zero-volume checks (won't run — volumes > 0)
+        _empty_df("plant", "rev", "gp"),
+        _gl_balance_df(100_000_000.0),
+        _revenue_df(),
+    ]
+    get_alerts(date_param="2026-07-03")
+    uc_call = mock_query_df.call_args_list[0]
+    sql = uc_call[0][0]
+    assert '"GR_Qty"' in sql, f"Must use GR_Qty column, got: {sql}"
+    assert "Actual GR QTY" not in sql, "Must NOT use old raw SAP column name"
+
+
+@patch("backend.routers.briefing.query_df")
 def test_cfo_kpis_invalid_date_raises_400(mock_query_df):
     """Verify that an invalid asOf date raises HTTPException 400."""
     with pytest.raises(HTTPException) as exc_info:
