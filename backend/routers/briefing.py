@@ -194,6 +194,52 @@ def _query_gl_entry_count(year: int, month: int) -> int:
         return 0
 
 
+def _query_ar_overdue_gt60(year: int) -> float:
+    """
+    Sum open AR items overdue > 60 days from v_ar (FBL5N data).
+
+    v_ar columns:
+      "Company Code Currency Value" — open amount in THB
+      "Days 1"                      — days outstanding (positive = overdue, BIGINT)
+      "Fiscal Year"                 — fiscal year (BIGINT)
+      company_code                  — company filter
+
+    Note: brief specified "Year" column but actual v_ar schema uses "Fiscal Year".
+
+    Returns 0.0 if v_ar has no data or query fails.
+    """
+    try:
+        df = query_df(
+            """
+            SELECT SUM("Company Code Currency Value") AS overdue_amt
+            FROM v_ar
+            WHERE company_code = ?
+              AND "Fiscal Year" = ?
+              AND CAST("Days 1" AS DOUBLE) > 60
+              AND "Company Code Currency Value" > 0
+            """,
+            ["1000", year],
+        )
+        return round(_safe_float(df.iloc[0]["overdue_amt"]) if not df.empty else 0.0, 2)
+    except Exception:
+        return 0.0
+
+
+def _compute_dso(ar_balance: float, revenue_mtd: float, fiscal_day: int) -> float | None:
+    """
+    Simple DSO = AR balance / (annualised daily revenue).
+
+    Uses revenue_mtd / fiscal_day as proxy for daily revenue rate.
+    Returns None when revenue_mtd is 0 (avoid division by zero).
+    """
+    if revenue_mtd <= 0 or fiscal_day <= 0:
+        return None
+    daily_revenue = revenue_mtd / fiscal_day
+    if daily_revenue <= 0:
+        return None
+    return round(ar_balance / daily_revenue, 1)
+
+
 def _query_plant_unit_costs(year: int, month: int) -> dict[str, dict]:
     """
     Compute per-plant unit cost (THB/MT) from v_production Actual GR Amount.
@@ -298,6 +344,10 @@ def get_cfo_kpis(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
     cash_display   = abs(cash_balance)
     cash_status    = "safe" if cash_display >= CASH_SAFE_THRESHOLD else "watch"
 
+    # AR Overdue >60 days (v_ar FBL5N data)
+    ar_overdue_gt60 = _query_ar_overdue_gt60(year)
+    ar_dso          = _compute_dso(ar_balance, revenue_mtd, fiscal_day)
+
     has_live_data  = revenue_mtd > 0 or prod_vol > 0
 
     return {
@@ -338,8 +388,8 @@ def get_cfo_kpis(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
         },
         "arOutstanding": {
             "value":       round(ar_balance, 2),
-            "overdueGt60": None,     # needs AR aging table (Phase 2)
-            "dso":         None,     # needs daily sales denominator (Phase 2)
+            "overdueGt60": ar_overdue_gt60 if ar_overdue_gt60 > 0 else None,
+            "dso":         ar_dso,
             "status":      ar_status,
             "linkTo":      "/finance/working-capital",
         },

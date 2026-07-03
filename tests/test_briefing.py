@@ -362,3 +362,43 @@ def test_cfo_kpis_invalid_date_raises_400(mock_query_df):
     with pytest.raises(HTTPException) as exc_info:
         get_cfo_kpis(asOf="not-a-date")
     assert exc_info.value.status_code == 400
+
+
+@patch("backend.routers.briefing.query_df")
+def test_cfo_kpis_ar_overdue_gt60_is_populated(mock_query_df):
+    """
+    get_cfo_kpis must return a non-null overdueGt60 value when v_ar has data.
+    Call order: revenue, gp, production-volume, ar-balance, cash-balance, ar-overdue.
+    """
+    mock_query_df.side_effect = [
+        _revenue_df(),
+        _gp_df(),
+        _prod_df(),
+        _gl_balance_df(350_000_000.0),          # AR balance (v_gl 12*)
+        _gl_balance_df(80_000_000.0),            # Cash (v_gl 11*)
+        pd.DataFrame({"overdue_amt": [30_000_000.0]}),  # v_ar overdue >60d
+    ]
+    result = get_cfo_kpis(asOf="2026-07-03")
+    assert result["arOutstanding"]["overdueGt60"] == 30_000_000.0
+    assert result["arOutstanding"]["dso"] is not None
+
+
+@patch("backend.routers.briefing.query_df")
+def test_cfo_kpis_ar_overdue_uses_v_ar(mock_query_df):
+    """AR overdue query must hit v_ar with company_code='1000' and Days 1 > 60."""
+    mock_query_df.side_effect = [
+        _revenue_df(),
+        _gp_df(),
+        _prod_df(),
+        _gl_balance_df(350_000_000.0),
+        _gl_balance_df(80_000_000.0),
+        pd.DataFrame({"overdue_amt": [30_000_000.0]}),
+    ]
+    get_cfo_kpis(asOf="2026-07-03")
+    # AR overdue query is the 6th call (index 5)
+    ar_call = mock_query_df.call_args_list[5]
+    sql    = ar_call[0][0]
+    params = ar_call[0][1]
+    assert "v_ar" in sql, f"Must query v_ar, got: {sql}"
+    assert "Days 1" in sql or "Days_1" in sql, "Must filter on Days 1 column"
+    assert "1000" in params, "Must filter company_code='1000'"
