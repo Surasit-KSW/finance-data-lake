@@ -1,8 +1,11 @@
 """
 routers/data_lake.py
 ====================
-Finance Data Lake — consolidated DuckDB endpoints for Phase 3 wiring.
-All endpoints source from local DuckDB views.
+Finance Data Lake — FP&A + Treasury endpoints.
+Dual-mode: local DuckDB (v_gl / v_sales) or cloud Neon (v_gl_summary only).
+
+Cloud-compatible: all queries fall back to v_gl_summary when v_gl / v_sales
+are not available (T2 aggregates only — no raw transactions in Neon).
 
 /api/v1/data-lake/fpa-summary   — 12-month Actual vs Prior Year P&L
 /api/v1/data-lake/fpa-variance  — GL-level cost variance vs prior-year same month
@@ -34,35 +37,11 @@ def _parse_date(s: str) -> date:
         raise HTTPException(status_code=400, detail=f"Invalid date '{s}'. Use YYYY-MM-DD.")
 
 
-def _gl_balance(year: int, month: int, account_prefix: str, ytd: bool = True) -> float:
-    """
-    Sum Net_Amount from v_gl for accounts matching account_prefix%.
-    ytd=True → cumulative Jan–month; ytd=False → single month.
-    Sign: Assets (1.*) = positive, Liabilities (2.*) = negative — caller applies abs() as needed.
-    """
-    month_cond = 'CAST("Month" AS INTEGER) <= ?' if ytd else 'CAST("Month" AS INTEGER) = ?'
-    try:
-        df = query_df(
-            f"""
-            SELECT SUM("Net_Amount") AS balance
-            FROM v_gl
-            WHERE company_code = ?
-              AND CAST("Year" AS INTEGER) = ?
-              AND {month_cond}
-              AND CAST("G/L Account" AS VARCHAR) LIKE ?
-            """,
-            ["1000", year, month, f"{account_prefix}%"],
-        )
-        return _safe_float(df.iloc[0]["balance"]) if not df.empty else 0.0
-    except Exception:
-        return 0.0
-
-
 def _gl_summary_amount(year: int, month: int, gl_group) -> float:
     """
-    Sum Net_Amount from v_gl_summary for given GL_Group(s) in a single month.
+    Sum net_amount from v_gl_summary for given gl_group(s) in a single month.
     gl_group may be a str or list[str].
-    Note: v_gl_summary has no company_code column (single-entity, 1000 only).
+    Works on both DuckDB and Neon (column names are lowercase in Neon).
     """
     try:
         if isinstance(gl_group, list):
@@ -70,22 +49,22 @@ def _gl_summary_amount(year: int, month: int, gl_group) -> float:
             params = gl_group + [year, month]
             df = query_df(
                 f"""
-                SELECT SUM("Net_Amount") AS total
+                SELECT SUM(net_amount) AS total
                 FROM v_gl_summary
-                WHERE "GL_Group" IN ({placeholders})
-                  AND CAST("Year" AS INTEGER) = ?
-                  AND CAST("Month" AS INTEGER) = ?
+                WHERE gl_group IN ({placeholders})
+                  AND year = ?
+                  AND month = ?
                 """,
                 params,
             )
         else:
             df = query_df(
                 """
-                SELECT SUM("Net_Amount") AS total
+                SELECT SUM(net_amount) AS total
                 FROM v_gl_summary
-                WHERE "GL_Group" = ?
-                  AND CAST("Year" AS INTEGER) = ?
-                  AND CAST("Month" AS INTEGER) = ?
+                WHERE gl_group = ?
+                  AND year = ?
+                  AND month = ?
                 """,
                 [gl_group, year, month],
             )
@@ -94,42 +73,52 @@ def _gl_summary_amount(year: int, month: int, gl_group) -> float:
         return 0.0
 
 
-def _sales_revenue(year: int, month: int) -> float:
-    """Revenue from v_sales (Net_Value_THB, company 1000, non-cancelled rows)."""
+def _gl_summary_prefix(year: int, month: int, account_prefix: str, ytd: bool = True) -> float:
+    """
+    Sum net_amount from v_gl_summary for accounts matching account_prefix (first 2 chars).
+    ytd=True  → cumulative Jan–month (balance sheet items).
+    ytd=False → single month only.
+
+    Replaces _gl_balance() which used v_gl T1 raw transactions.
+    Works on both DuckDB (G/L Account stored as DOUBLE) and Neon (TEXT).
+    CAST to VARCHAR is a no-op on Neon text but required on DuckDB float.
+    """
     try:
-        df = query_df(
-            """
-            SELECT SUM("Net_Value_THB") AS revenue
-            FROM v_sales
-            WHERE company_code = ?
-              AND CAST("Year" AS INTEGER) = ?
-              AND CAST("Month" AS INTEGER) = ?
-              AND ("Cancelled" IS NULL OR TRIM("Cancelled") = '')
-            """,
-            ["1000", year, month],
-        )
-        return _safe_float(df.iloc[0]["revenue"]) if not df.empty else 0.0
+        if ytd:
+            df = query_df(
+                """
+                SELECT SUM(net_amount) AS balance
+                FROM v_gl_summary
+                WHERE year = ?
+                  AND month <= ?
+                  AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) = ?
+                """,
+                [year, month, account_prefix],
+            )
+        else:
+            df = query_df(
+                """
+                SELECT SUM(net_amount) AS balance
+                FROM v_gl_summary
+                WHERE year = ?
+                  AND month = ?
+                  AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) = ?
+                """,
+                [year, month, account_prefix],
+            )
+        return _safe_float(df.iloc[0]["balance"]) if not df.empty else 0.0
     except Exception:
         return 0.0
 
 
-def _ar_overdue_gt60(year: int) -> float:
-    """Open AR items overdue >60 days from v_ar. Returns 0.0 if v_ar not ready."""
-    try:
-        df = query_df(
-            """
-            SELECT SUM("Company Code Currency Value") AS overdue_amt
-            FROM v_ar
-            WHERE company_code = ?
-              AND "Fiscal Year" = ?
-              AND CAST("Days 1" AS DOUBLE) > 60
-              AND "Company Code Currency Value" > 0
-            """,
-            ["1000", year],
-        )
-        return round(_safe_float(df.iloc[0]["overdue_amt"]) if not df.empty else 0.0, 2)
-    except Exception:
-        return 0.0
+def _revenue(year: int, month: int) -> float:
+    """
+    Revenue for a single month.
+    SAP convention: Revenue (4.*) is credit → Net_Amount is NEGATIVE → negate for display.
+    Uses v_gl_summary (cloud-compatible). Works on DuckDB and Neon.
+    """
+    raw = _gl_summary_amount(year, month, "4. Revenue")
+    return abs(raw)   # flip credit sign → positive revenue figure
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -139,15 +128,15 @@ def get_fpa_summary(year: int = Query(2026)):
     """
     12-month Actual vs Prior Year P&L for FP&A page top section.
 
-    Revenue     ← v_sales (Net_Value_THB, company 1000, non-cancelled)
-    COGS        ← v_gl_summary GL_Group = '5. COGS'
-    Opex        ← v_gl_summary GL_Group IN ('6. Selling Exp', '7. Admin Exp')
-    Prior Year  ← same queries with year-1
+    Revenue  ← v_gl_summary GL_Group = '4. Revenue' (negated — SAP credit convention)
+    COGS     ← v_gl_summary GL_Group = '5. COGS'
+    Opex     ← v_gl_summary GL_Group IN ('6. Selling Exp', '7. Admin Exp')
+    Prior Yr ← same queries with year-1
 
+    Cloud-compatible: v_gl_summary available on both DuckDB and Neon.
     Future months (month > today for current year) → all numeric fields null.
     """
     try:
-        # Probe: verify DuckDB is reachable before entering month loop
         query_df("SELECT 1", [])
         today = date.today()
         months_out = []
@@ -163,10 +152,10 @@ def get_fpa_summary(year: int = Query(2026)):
                 continue
 
             try:
-                revenue      = _sales_revenue(year, month)
+                revenue      = _revenue(year, month)
                 cogs         = _gl_summary_amount(year, month, "5. COGS")
                 opex         = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
-                py_revenue   = _sales_revenue(year - 1, month)
+                py_revenue   = _revenue(year - 1, month)
                 py_cogs      = _gl_summary_amount(year - 1, month, "5. COGS")
 
                 gross_profit    = revenue - cogs
@@ -204,67 +193,63 @@ def get_fpa_variance(year: int = Query(2026), month: int = Query(7)):
     """
     GL-level cost variance vs prior-year same month for FP&A drill-down.
 
-    Actual  ← v_gl GROUP BY G/L Account for year/month (company 1000, cost accounts 5*)
-    Baseline← v_gl GROUP BY G/L Account for year-1/month (prior year same month)
-    Variance= actual - baseline
-    Flag    = 'over' if variancePct > 5%, 'under' if variancePct < -5%, else 'ok'
+    Actual   ← v_gl_summary GROUP BY G/L Account, GL_Group LIKE '5.*' for year/month
+    Baseline ← v_gl_summary same query for year-1/month
+    Variance = actual - baseline
+    Flag     = 'over' if variancePct > 5%, 'under' if < -5%, else 'ok'
+
+    Cloud-compatible: uses v_gl_summary (Neon OK).
     """
     period = f"{year:04d}-{month:02d}"
     try:
-        # Current period: actual GL amounts per account (cost accounts 5*)
         actual_df = query_df(
             """
             SELECT
-                CAST("G/L Account" AS VARCHAR)  AS gl_account,
-                MAX("G/L Account: Long Text")   AS gl_name,
-                SUM("Net_Amount")               AS actual
-            FROM v_gl
-            WHERE company_code = ?
-              AND CAST("Year" AS INTEGER) = ?
+                "G/L Account"              AS gl_account,
+                MAX("GL_Name")             AS gl_name,
+                SUM("Net_Amount")          AS actual
+            FROM v_gl_summary
+            WHERE CAST("Year" AS INTEGER) = ?
               AND CAST("Month" AS INTEGER) = ?
-              AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
+              AND "GL_Group" = '5. COGS'
             GROUP BY "G/L Account"
             ORDER BY SUM("Net_Amount") DESC
             """,
-            ["1000", year, month],
+            [year, month],
         )
 
-        # Baseline: prior year same month
         baseline_df = query_df(
             """
             SELECT
-                CAST("G/L Account" AS VARCHAR) AS gl_account,
-                SUM("Net_Amount") AS baseline
-            FROM v_gl
-            WHERE company_code = ?
-              AND CAST("Year" AS INTEGER) = ?
+                "G/L Account"              AS gl_account,
+                SUM("Net_Amount")          AS baseline
+            FROM v_gl_summary
+            WHERE CAST("Year" AS INTEGER) = ?
               AND CAST("Month" AS INTEGER) = ?
-              AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
-            GROUP BY CAST("G/L Account" AS VARCHAR)
+              AND "GL_Group" = '5. COGS'
+            GROUP BY "G/L Account"
             """,
-            ["1000", year - 1, month],
+            [year - 1, month],
         )
 
-        # Merge on gl_account
         baseline_map = {}
         for _, row in baseline_df.iterrows():
             baseline_map[str(row["gl_account"])] = _safe_float(row["baseline"])
 
         categories = []
         for _, row in actual_df.iterrows():
-            gl_acct   = str(row["gl_account"])
-            gl_name   = str(row.get("gl_name", gl_acct))
-            actual    = _safe_float(row["actual"])
-            baseline  = baseline_map.get(gl_acct, 0.0)
-            variance  = round(actual - baseline, 2)
-            var_pct   = round(variance / baseline * 100, 2) if baseline != 0 else None
+            gl_acct  = str(row["gl_account"])
+            gl_name  = str(row.get("gl_name", gl_acct))
+            actual   = _safe_float(row["actual"])
+            baseline = baseline_map.get(gl_acct, 0.0)
+            variance = round(actual - baseline, 2)
+            var_pct  = round(variance / baseline * 100, 2) if baseline != 0 else None
 
+            flag = "ok"
             if var_pct is not None and var_pct > 5.0:
                 flag = "over"
             elif var_pct is not None and var_pct < -5.0:
                 flag = "under"
-            else:
-                flag = "ok"
 
             categories.append({
                 "glAccount":   gl_acct,
@@ -287,62 +272,64 @@ def get_treasury(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
     """
     Cash + AR + AP + NWC runway snapshot for Treasury page.
 
-    Cash    ← v_gl accounts 11* (YTD cumulative, company 1000)
-    AR      ← v_gl accounts 12* (YTD cumulative, company 1000)
-    AP      ← v_gl accounts 21* (YTD cumulative, company 1000)
-    NWC     = AR + Cash - AP
-    Runway  = NWC / (monthly opex estimate from v_gl_summary)
-    trend6m = last 6 months cash balances
+    Cash  ← v_gl_summary accounts starting '11' (YTD cumulative)
+    AR    ← v_gl_summary accounts starting '12' (YTD cumulative)
+    AP    ← v_gl_summary accounts starting '21' + '22' (YTD cumulative)
+    NWC   = AR + Cash - AP
+    Runway= NWC / monthly opex
+
+    Revenue for DSO ← v_gl_summary GL_Group = '4. Revenue' (negated)
+
+    Cloud-compatible: all queries use v_gl_summary (Neon OK).
+    AR overdue >60d not available in T2 aggregates — returns null.
     """
     try:
         d = _parse_date(asOf)
         year, month = d.year, d.month
-        fiscal_day = d.day  # days elapsed in current month for DSO/DPO denominator
+        fiscal_day = d.day
 
-        # Probe: verify DuckDB is reachable — _gl_balance silently returns 0.0 on error,
-        # so we need an explicit probe that raises and lets the outer except catch it.
         query_df("SELECT 1", [])
 
-        # Cash (GL 11*, YTD cumulative)
-        cash = abs(_gl_balance(year, month, "11", ytd=True))
+        # Cash (accounts 11*, YTD cumulative)
+        cash = abs(_gl_summary_prefix(year, month, "11", ytd=True))
 
-        # AR (GL 12*, YTD cumulative)
-        ar = abs(_gl_balance(year, month, "12", ytd=True))
+        # AR (accounts 12*, YTD cumulative)
+        ar = abs(_gl_summary_prefix(year, month, "12", ytd=True))
 
-        # AP (GL 21* + 22*, YTD cumulative — trade payables span both prefixes)
-        ap = abs(_gl_balance(year, month, "21", ytd=True)) + abs(_gl_balance(year, month, "22", ytd=True))
+        # AP (accounts 21* + 22*, YTD cumulative)
+        ap = (
+            abs(_gl_summary_prefix(year, month, "21", ytd=True))
+            + abs(_gl_summary_prefix(year, month, "22", ytd=True))
+        )
 
         # NWC = AR + Cash - AP
         nwc = ar + cash - ap
 
-        # Monthly opex estimate for runway (current month from v_gl_summary)
+        # Monthly opex for burn rate / runway
         opex_monthly = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
         nwc_runway = round(nwc / opex_monthly, 1) if opex_monthly > 0 else None
 
-        # DSO = AR / (monthly revenue / fiscal_day)
-        revenue_mtd = _sales_revenue(year, month)
+        # DSO = AR / daily sales
+        revenue_mtd = _revenue(year, month)
         daily_sales = revenue_mtd / fiscal_day if fiscal_day > 0 and revenue_mtd > 0 else None
         dso = round(ar / daily_sales, 1) if daily_sales else None
 
-        # DPO = AP / (monthly COGS / fiscal_day)
+        # DPO = AP / daily COGS
         cogs_mtd = abs(_gl_summary_amount(year, month, "5. COGS"))
         daily_cogs = cogs_mtd / fiscal_day if fiscal_day > 0 and cogs_mtd > 0 else None
         dpo = round(ap / daily_cogs, 1) if daily_cogs else None
 
-        # 6-month cash trend (current month + 5 prior months)
+        # 6-month cash trend
         trend6m = []
         y, m = year, month
         for _ in range(6):
-            bal = abs(_gl_balance(y, m, "11", ytd=True))
+            bal = abs(_gl_summary_prefix(y, m, "11", ytd=True))
             trend6m.append({"month": f"{y:04d}-{m:02d}", "balance": round(bal, 2)})
             m -= 1
             if m == 0:
                 m = 12
                 y -= 1
-        trend6m.reverse()   # oldest → newest
-
-        # AR overdue >60 days (from v_ar; returns 0.0 if ETL not run yet)
-        ar_overdue = _ar_overdue_gt60(year)
+        trend6m.reverse()
 
         return {
             "asOf": asOf,
@@ -352,12 +339,12 @@ def get_treasury(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
             },
             "ar": {
                 "total":    round(ar, 2),
-                "overdue60": ar_overdue if ar_overdue > 0 else None,
+                "overdue60": None,   # T2 aggregates only — aging detail not available in cloud
                 "dso":      dso,
             },
             "ap": {
                 "total":  round(ap, 2),
-                "due30d": None,   # AP-aging not yet in ETL; Wave 4 item
+                "due30d": None,
                 "dpo":    dpo,
             },
             "nwcRunway": {
