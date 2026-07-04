@@ -70,9 +70,18 @@ def test_fpa_summary_revenue_filters_company_1000(mock_qdf):
     """Revenue query (v_sales) must include company_code='1000' in params."""
     mock_qdf.return_value = _revenue_df()
     get_fpa_summary(year=2025)
-    # First call is v_sales revenue for month=1
-    first_params = mock_qdf.call_args_list[0][0][1]
-    assert "1000" in first_params, f"Missing company_code='1000' in v_sales params: {first_params}"
+    # call_args_list[0] is the DB probe (SELECT 1); call_args_list[1] is v_sales for month=1
+    v_sales_params = mock_qdf.call_args_list[1][0][1]
+    assert "1000" in v_sales_params, f"Missing company_code='1000' in v_sales params: {v_sales_params}"
+
+
+@patch("backend.routers.data_lake.query_df")
+def test_fpa_summary_returns_graceful_on_error(mock_qdf):
+    """Full DB outage must return usingMock=True, not 12 months of nulls."""
+    mock_qdf.side_effect = Exception("DuckDB offline")
+    result = get_fpa_summary(year=2025)
+    assert result.get("usingMock") is True
+    assert result.get("months") == []
 
 
 # ─── /fpa-variance ────────────────────────────────────────────────────────────

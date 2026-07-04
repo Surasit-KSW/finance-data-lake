@@ -146,50 +146,57 @@ def get_fpa_summary(year: int = Query(2026)):
 
     Future months (month > today for current year) → all numeric fields null.
     """
-    today = date.today()
-    months_out = []
+    try:
+        # Probe: verify DuckDB is reachable before entering month loop
+        query_df("SELECT 1", [])
+        today = date.today()
+        months_out = []
 
-    for month in range(1, 13):
-        is_future = year > today.year or (year == today.year and month > today.month)
-        if is_future:
-            months_out.append({
-                "month": month, "revenue": None, "cogs": None,
-                "grossProfit": None, "gpMargin": None,
-                "opex": None, "ebit": None, "priorYear": None,
-            })
-            continue
+        for month in range(1, 13):
+            is_future = year > today.year or (year == today.year and month > today.month)
+            if is_future:
+                months_out.append({
+                    "month": month, "revenue": None, "cogs": None,
+                    "grossProfit": None, "gpMargin": None,
+                    "opex": None, "ebit": None, "priorYear": None,
+                })
+                continue
 
-        try:
-            revenue      = _sales_revenue(year, month)
-            cogs         = _gl_summary_amount(year, month, "5. COGS")
-            opex         = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
-            py_revenue   = _sales_revenue(year - 1, month)
-            py_cogs      = _gl_summary_amount(year - 1, month, "5. COGS")
+            try:
+                revenue      = _sales_revenue(year, month)
+                cogs         = _gl_summary_amount(year, month, "5. COGS")
+                opex         = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
+                py_revenue   = _sales_revenue(year - 1, month)
+                py_cogs      = _gl_summary_amount(year - 1, month, "5. COGS")
 
-            gross_profit    = revenue - cogs
-            py_gross_profit = py_revenue - py_cogs
+                gross_profit    = revenue - cogs
+                py_gross_profit = py_revenue - py_cogs
 
-            months_out.append({
-                "month":       month,
-                "revenue":     round(revenue, 2),
-                "cogs":        round(cogs, 2),
-                "grossProfit": round(gross_profit, 2),
-                "gpMargin":    round(gross_profit / revenue * 100, 2) if revenue > 0 else None,
-                "opex":        round(opex, 2),
-                "ebit":        round(gross_profit - opex, 2),
-                "priorYear": {
-                    "revenue":  round(py_revenue, 2),
-                    "gpMargin": round(py_gross_profit / py_revenue * 100, 2) if py_revenue > 0 else None,
-                },
-            })
-        except Exception:
-            months_out.append({
-                "month": month, "revenue": None, "cogs": None,
-                "grossProfit": None, "gpMargin": None,
-                "opex": None, "ebit": None, "priorYear": None,
-            })
+                months_out.append({
+                    "month":       month,
+                    "revenue":     round(revenue, 2),
+                    "cogs":        round(cogs, 2),
+                    "grossProfit": round(gross_profit, 2),
+                    "gpMargin":    round(gross_profit / revenue * 100, 2) if revenue > 0 else None,
+                    "opex":        round(opex, 2),
+                    "ebit":        round(gross_profit - opex, 2),
+                    "priorYear": {
+                        "revenue":  round(py_revenue, 2),
+                        "gpMargin": round(py_gross_profit / py_revenue * 100, 2) if py_revenue > 0 else None,
+                    },
+                })
+            except Exception:
+                months_out.append({
+                    "month": month, "revenue": None, "cogs": None,
+                    "grossProfit": None, "gpMargin": None,
+                    "opex": None, "ebit": None, "priorYear": None,
+                })
 
-    return {"year": year, "months": months_out}
+        return {"year": year, "months": months_out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"year": year, "months": [], "usingMock": True, "error": str(e)}
 
 
 @router.get("/fpa-variance")
@@ -208,16 +215,16 @@ def get_fpa_variance(year: int = Query(2026), month: int = Query(7)):
         actual_df = query_df(
             """
             SELECT
-                CAST("G/L Account" AS VARCHAR) AS gl_account,
-                MAX("G/L Account") AS gl_name,
-                SUM("Net_Amount") AS actual
+                CAST("G/L Account" AS VARCHAR)  AS gl_account,
+                MAX("G/L Account: Long Text")   AS gl_name,
+                SUM("Net_Amount")               AS actual
             FROM v_gl
             WHERE company_code = ?
               AND CAST("Year" AS INTEGER) = ?
               AND CAST("Month" AS INTEGER) = ?
               AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
-            GROUP BY CAST("G/L Account" AS VARCHAR)
-            ORDER BY gl_account
+            GROUP BY "G/L Account"
+            ORDER BY SUM("Net_Amount") DESC
             """,
             ["1000", year, month],
         )
