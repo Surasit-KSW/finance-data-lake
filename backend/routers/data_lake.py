@@ -297,34 +297,37 @@ def get_treasury(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
     try:
         d = _parse_date(asOf)
         year, month = d.year, d.month
+        fiscal_day = d.day  # days elapsed in current month for DSO/DPO denominator
 
-        # Probe query to detect DB availability — raises if DuckDB offline.
-        # This allows the outer except to catch it and return usingMock=True.
-        probe_df = query_df(
-            """
-            SELECT SUM("Net_Amount") AS balance
-            FROM v_gl
-            WHERE company_code = ?
-              AND CAST("Year" AS INTEGER) = ?
-              AND CAST("Month" AS INTEGER) = ?
-              AND CAST("G/L Account" AS VARCHAR) LIKE ?
-            """,
-            ["1000", year, month, "11%"],
-        )
-        cash_display = abs(_safe_float(probe_df.iloc[0]["balance"]) if not probe_df.empty else 0.0)
+        # Probe: verify DuckDB is reachable — _gl_balance silently returns 0.0 on error,
+        # so we need an explicit probe that raises and lets the outer except catch it.
+        query_df("SELECT 1", [])
 
-        # AR (GL 12*, debit positive)
+        # Cash (GL 11*, YTD cumulative)
+        cash = abs(_gl_balance(year, month, "11", ytd=True))
+
+        # AR (GL 12*, YTD cumulative)
         ar = abs(_gl_balance(year, month, "12", ytd=True))
 
-        # AP (GL 21*, credit negative → abs)
-        ap = abs(_gl_balance(year, month, "21", ytd=True))
+        # AP (GL 21* + 22*, YTD cumulative — trade payables span both prefixes)
+        ap = abs(_gl_balance(year, month, "21", ytd=True)) + abs(_gl_balance(year, month, "22", ytd=True))
 
         # NWC = AR + Cash - AP
-        nwc = ar + cash_display - ap
+        nwc = ar + cash - ap
 
-        # Opex estimate for runway (last month's opex from v_gl_summary)
+        # Monthly opex estimate for runway (current month from v_gl_summary)
         opex_monthly = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
         nwc_runway = round(nwc / opex_monthly, 1) if opex_monthly > 0 else None
+
+        # DSO = AR / (monthly revenue / fiscal_day)
+        revenue_mtd = _sales_revenue(year, month)
+        daily_sales = revenue_mtd / fiscal_day if fiscal_day > 0 and revenue_mtd > 0 else None
+        dso = round(ar / daily_sales, 1) if daily_sales else None
+
+        # DPO = AP / (monthly COGS / fiscal_day)
+        cogs_mtd = abs(_gl_summary_amount(year, month, "5. COGS"))
+        daily_cogs = cogs_mtd / fiscal_day if fiscal_day > 0 and cogs_mtd > 0 else None
+        dpo = round(ap / daily_cogs, 1) if daily_cogs else None
 
         # 6-month cash trend (current month + 5 prior months)
         trend6m = []
@@ -338,24 +341,31 @@ def get_treasury(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
                 y -= 1
         trend6m.reverse()   # oldest → newest
 
-        # AR overdue >60 days
+        # AR overdue >60 days (from v_ar; returns 0.0 if ETL not run yet)
         ar_overdue = _ar_overdue_gt60(year)
 
         return {
             "asOf": asOf,
             "cash": {
-                "balance":  round(cash_display, 2),
-                "trend6m":  trend6m,
+                "balance": round(cash, 2),
+                "trend6m": trend6m,
             },
             "ar": {
-                "balance":    round(ar, 2),
-                "overdueGt60": ar_overdue if ar_overdue > 0 else None,
+                "total":    round(ar, 2),
+                "overdue60": ar_overdue if ar_overdue > 0 else None,
+                "dso":      dso,
             },
             "ap": {
-                "balance": round(ap, 2),
+                "total":  round(ap, 2),
+                "due30d": None,   # AP-aging not yet in ETL; Wave 4 item
+                "dpo":    dpo,
             },
-            "nwc":       round(nwc, 2),
-            "nwcRunway": nwc_runway,
+            "nwcRunway": {
+                "netWorkingCapital": round(nwc, 2),
+                "monthlyBurnRate":   round(opex_monthly, 2),
+                "runwayMonths":      nwc_runway,
+            },
+            "usingMock": False,
         }
 
     except Exception:

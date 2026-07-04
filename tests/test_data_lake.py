@@ -130,13 +130,26 @@ def test_fpa_variance_returns_graceful_on_error(mock_qdf):
 
 @patch("backend.routers.data_lake.query_df")
 def test_treasury_returns_expected_shape(mock_qdf):
-    """Response must have cash, ar, ap, nwcRunway top-level keys."""
+    """Response must have cash/ar/ap/nwcRunway with nested keys matching TreasuryData TypeScript interface."""
     mock_qdf.return_value = _balance_df()
     result = get_treasury(asOf="2026-07-04")
+    # Top-level structure
     assert "cash" in result
     assert "ar" in result
     assert "ap" in result
     assert "nwcRunway" in result
+    # Nested keys must match TypeScript TreasuryData interface
+    assert "balance" in result["cash"], "cash.balance missing"
+    assert "trend6m" in result["cash"], "cash.trend6m missing"
+    assert "total" in result["ar"], "ar.total missing (was 'balance')"
+    assert "overdue60" in result["ar"], "ar.overdue60 missing (was 'overdueGt60')"
+    assert "dso" in result["ar"], "ar.dso missing"
+    assert "total" in result["ap"], "ap.total missing (was 'balance')"
+    assert "due30d" in result["ap"], "ap.due30d missing"
+    assert "dpo" in result["ap"], "ap.dpo missing"
+    assert "runwayMonths" in result["nwcRunway"], "nwcRunway.runwayMonths missing (was scalar)"
+    assert "monthlyBurnRate" in result["nwcRunway"], "nwcRunway.monthlyBurnRate missing"
+    assert "netWorkingCapital" in result["nwcRunway"], "nwcRunway.netWorkingCapital missing"
 
 
 @patch("backend.routers.data_lake.query_df")
