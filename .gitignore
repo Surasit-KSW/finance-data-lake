@@ -25,10 +25,37 @@ env/
 .env.*.local
 *.secret
 
-# ── Data files (stay local — too large / sensitive) ─────────
+# ── Data files — Tier-based classification ───────────────────
+#
+# T1 (NEVER cloud): raw SAP transactions — too sensitive
 01_Bronze_Raw/
-02_Silver_Cleaned/*.parquet
-03_Gold_DataMarts/*.parquet
+02_Silver_Cleaned/master_gl_*.parquet
+02_Silver_Cleaned/master_sales_*.parquet
+02_Silver_Cleaned/master_production_*.parquet
+02_Silver_Cleaned/master_ar_*.parquet
+02_Silver_Cleaned/master_ap_*.parquet
+02_Silver_Cleaned/master_tb_*.parquet
+02_Silver_Cleaned/master_ksb1_*.parquet
+02_Silver_Cleaned/master_mb51_*.parquet
+02_Silver_Cleaned/master_prd_*.parquet
+#
+# T2 (OK for cloud, committed to git): computed/aggregated — NOT raw transactions
+# 02_Silver_Cleaned/ga_performance_*.parquet   ← allowed (committed)
+# 02_Silver_Cleaned/ga_production_*.parquet    ← allowed (committed)
+# 02_Silver_Cleaned/ga_tb_*.parquet            ← allowed (committed)
+# 02_Silver_Cleaned/amc_performance_*.parquet  ← allowed (committed)
+# 03_Gold_DataMarts/Summary_GL_*.parquet       ← allowed (committed)
+#
+# T1 Gold (keep local): audit/detailed financial statements
+03_Gold_DataMarts/gold_leadsheet.parquet
+03_Gold_DataMarts/gold_related_party.parquet
+03_Gold_DataMarts/gold_elimination.parquet
+03_Gold_DataMarts/gold_ppe.parquet
+03_Gold_DataMarts/gold_cashflow.parquet
+03_Gold_DataMarts/gold_gp_by_plant.parquet
+03_Gold_DataMarts/gold_revenue_monthly.parquet
+03_Gold_DataMarts/v_gl_summary.parquet
+#
 04_Reports/                    # output Excel reports — local only
 06_Scripts/leadsheet/output/
 *.xlsx

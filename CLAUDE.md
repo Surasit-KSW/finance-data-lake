@@ -301,7 +301,18 @@ These projects connect to this API. Never remove or rename an endpoint they use.
 
 6. **Do not put Python scripts in `01_Bronze_Raw/`.** Bronze is read-only SAP export storage. Scripts belong in `06_Scripts/` (analysis/audit/reporting) or `04_Data_Pipelines/` (ETL). If you see a `.py` file in Bronze, move it out immediately.
 
-7. **Do not commit data files.** `01_Bronze_Raw/`, `02_Silver_Cleaned/*.parquet`, `03_Gold_DataMarts/*.parquet`, `04_Reports/`, `*.duckdb`, `*.db`, `*.xlsx`, `.env` are all gitignored. They contain sensitive financial data.
+7. **Data files follow a Tier classification — not a blanket ban.**
+
+| Tier | ไฟล์ | Git | Cloud (Render/Railway) |
+|------|------|-----|------------------------|
+| **T1 — Raw** | `01_Bronze_Raw/`, `master_gl_*`, `master_sales_*`, `master_production_*`, `master_ar_*`, `master_ap_*`, `*.duckdb` | ❌ gitignored | ❌ ห้ามเด็ดขาด |
+| **T2 — Computed** | `ga_performance_*`, `ga_production_*`, `ga_tb_*`, `amc_performance_*`, `Summary_GL_*` | ✅ committed | ✅ อนุญาต (ต้องมี API_KEY) |
+| **T3 — User data** | scenarios, user-created content | ✅ via Neon | ✅ Neon only |
+
+**เงื่อนไข T2 cloud deployment:**
+- `API_KEY` ต้องตั้งค่าใน env vars ของ cloud provider (ไม่ hardcode)
+- `CORS_ORIGINS` ต้อง lock เฉพาะ domain ที่รู้จัก
+- ไม่มี endpoint ที่ return raw T1 rows
 
 8. **Do not put credentials or secrets at project root.** OAuth client secrets → `07_Workspace/.credentials/`. API keys → `.env`. Nothing credential-like lives at root level. `client_secret_*.json` is gitignored but still must not sit at root.
 
