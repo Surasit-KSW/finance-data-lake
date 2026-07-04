@@ -79,6 +79,12 @@ PLANT_LABELS: dict[str, str] = {
     "1200": "Plant 1200 — Pipe A2",
 }
 
+PLANT_PRODUCTS: dict[str, str] = {
+    "1300": "GI (Galvanized Iron)",
+    "1100": "Steel Pipe A1",
+    "1200": "Steel Pipe A2 / C-Channel",
+}
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -282,6 +288,31 @@ def _query_plant_unit_costs(year: int, month: int) -> dict[str, dict]:
         }
 
     return result
+
+
+def _query_prod_trend(year: int, month: int, n_months: int = 6) -> list[dict]:
+    """
+    Return per-plant unit cost for the last n_months months ending at year/month.
+    Each entry: {"month": "YYYY-MM", "plant": str, "unit_cost": float}
+
+    Builds the trend by calling _query_plant_unit_costs for each month window.
+    Cheaper than a self-join; n_months is small (6).
+    """
+    results = []
+    y, m = year, month
+    for _ in range(n_months):
+        costs = _query_plant_unit_costs(y, m)
+        for plant, data in costs.items():
+            results.append({
+                "month":     f"{y:04d}-{m:02d}",
+                "plant":     plant,
+                "unit_cost": data["unit_cost"],
+            })
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return results
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -683,4 +714,77 @@ def get_alerts(date_param: str = Query(..., alias="date", description="Alert dat
         "date":   date_param,
         "count":  len(alerts),
         "alerts": alerts,
+    }
+
+
+@router.get("/production-pulse")
+def get_production_pulse(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")):
+    """
+    Per-plant production KPI snapshot for Morning Briefing Section 4.
+
+    Returns current-month volume + unit cost + 6-month cost sparkline per plant.
+    Data source: v_production (Silver layer, monthly MB52 data).
+
+    Status rules:
+      critical  — unitCostDelta > 1500 THB/MT  OR  volume < 90% of target
+      watch     — unitCostDelta > 500  THB/MT  OR  volume < 97% of target
+      on-track  — otherwise
+    """
+    d = _parse_date(asOf)
+    year, month = d.year, d.month
+
+    # Current month per-plant data
+    current_costs = _query_plant_unit_costs(year, month)
+
+    # 6-month trend (current month + 5 prior months)
+    trend_raw = _query_prod_trend(year, month, n_months=6)
+
+    # Group trend by plant: {plant: [{month, cost}, ...]} sorted oldest → newest
+    trend_by_plant: dict[str, list[dict]] = {}
+    for entry in trend_raw:
+        p = entry["plant"]
+        trend_by_plant.setdefault(p, []).append({
+            "month": entry["month"],
+            "cost":  entry["unit_cost"],
+        })
+    for p in trend_by_plant:
+        trend_by_plant[p].sort(key=lambda x: x["month"])
+
+    plants_out = []
+    for plant in ALL_PLANTS:
+        data       = current_costs.get(plant, {})
+        vol_mt     = data.get("volume_mt", 0.0)
+        unit_cost  = data.get("unit_cost", 0.0)
+        cost_target = PLANT_UNIT_COST_TARGET.get(plant, 0.0)
+        vol_target  = PLANT_MONTHLY_TARGET_MT.get(plant, 0.0)
+        cost_delta  = round(unit_cost - cost_target, 2) if unit_cost > 0 else 0.0
+        pct_vol     = round(vol_mt / vol_target * 100, 1) if vol_target > 0 else 0.0
+
+        if cost_delta > 1_500 or (vol_mt > 0 and pct_vol < 90):
+            status = "critical"
+        elif cost_delta > 500 or (vol_mt > 0 and pct_vol < 97):
+            status = "watch"
+        else:
+            status = "on-track"
+
+        plants_out.append({
+            "id":             plant,
+            "label":          PLANT_LABELS.get(plant, f"Plant {plant}"),
+            "product":        PLANT_PRODUCTS.get(plant, ""),
+            "todayVolume":    vol_mt,
+            "targetVolume":   vol_target,
+            "pctOfTarget":    pct_vol,
+            "unit":           "MT",
+            "unitCostToday":  unit_cost,
+            "unitCostTarget": cost_target,
+            "unitCostDelta":  cost_delta,
+            "status":         status,
+            "costTrend":      trend_by_plant.get(plant, []),
+            "linkTo":         "/monitor/overview",
+        })
+
+    return {
+        "status": "ok",
+        "date":   asOf,
+        "plants": plants_out,
     }

@@ -17,7 +17,7 @@ import pytest
 from unittest.mock import patch, call
 import pandas as pd
 from fastapi import HTTPException
-from backend.routers.briefing import get_cfo_kpis, get_finance_ops, get_alerts
+from backend.routers.briefing import get_cfo_kpis, get_finance_ops, get_alerts, get_production_pulse
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
@@ -402,3 +402,74 @@ def test_cfo_kpis_ar_overdue_uses_v_ar(mock_query_df):
     assert "v_ar" in sql, f"Must query v_ar, got: {sql}"
     assert "Days 1" in sql or "Days_1" in sql, "Must filter on Days 1 column"
     assert "1000" in params, "Must filter company_code='1000'"
+
+
+# ─── Tests: get_production_pulse ───────────────────────────────────────────────
+
+def _trend_cost_df(plant="1300", month=1, vol_mt=11000.0, total_cost=291_995_000.0):
+    return pd.DataFrame({
+        "plant":      [plant],
+        "vol_mt":     [vol_mt],
+        "total_cost": [total_cost],
+    })
+
+
+@patch("backend.routers.briefing.query_df")
+def test_production_pulse_returns_all_plants(mock_query_df):
+    """
+    GET /production-pulse must return a plant entry for each plant in ALL_PLANTS.
+    Uses _query_plant_unit_costs (1 call) + _query_prod_trend (1 call per plant × 6 months).
+    """
+    # 1 call for current month unit costs (all plants), then 6×3=18 trend calls
+    current_cost = pd.DataFrame({
+        "plant":      ["1300", "1100", "1200"],
+        "vol_mt":     [4_200.0, 2_800.0, 7_600.0],
+        "total_cost": [112_476_000.0, 89_600_000.0, 252_760_000.0],
+    })
+    # Each of the 18 trend calls returns one plant row (simplified: single plant)
+    trend_row = pd.DataFrame({"plant": ["1300"], "vol_mt": [11_000.0], "total_cost": [291_995_000.0]})
+    mock_query_df.side_effect = [current_cost] + [trend_row] * 18
+
+    result = get_production_pulse(asOf="2026-07-03")
+
+    assert result["status"] == "ok"
+    assert len(result["plants"]) == 3
+    plant_ids = [p["id"] for p in result["plants"]]
+    assert "1300" in plant_ids
+    assert "1100" in plant_ids
+    assert "1200" in plant_ids
+
+
+@patch("backend.routers.briefing.query_df")
+def test_production_pulse_plant_status_logic(mock_query_df):
+    """Plant status must be 'critical' when unit cost delta > 1500 THB/MT."""
+    # Plant 1200 with high unit cost: ฿35,050/MT vs target ฿33,290/MT → delta 1,760
+    current_cost = pd.DataFrame({
+        "plant":      ["1200"],
+        "vol_mt":     [7_600.0],
+        "total_cost": [266_380_000.0],   # = 35,050 × 7,600
+    })
+    trend_row = pd.DataFrame({"plant": ["1200"], "vol_mt": [22_000.0], "total_cost": [732_380_000.0]})
+    mock_query_df.side_effect = [current_cost] + [trend_row] * 6
+
+    result = get_production_pulse(asOf="2026-07-03")
+    p1200 = next((p for p in result["plants"] if p["id"] == "1200"), None)
+    assert p1200 is not None
+    assert p1200["status"] == "critical"
+
+
+@patch("backend.routers.briefing.query_df")
+def test_production_pulse_cost_trend_has_6_months(mock_query_df):
+    """costTrend must contain exactly 6 entries per plant."""
+    current_cost = pd.DataFrame({
+        "plant":      ["1300"],
+        "vol_mt":     [4_200.0],
+        "total_cost": [112_476_000.0],
+    })
+    trend_row = pd.DataFrame({"plant": ["1300"], "vol_mt": [11_000.0], "total_cost": [291_995_000.0]})
+    mock_query_df.side_effect = [current_cost] + [trend_row] * 6
+
+    result = get_production_pulse(asOf="2026-07-03")
+    p1300 = next((p for p in result["plants"] if p["id"] == "1300"), None)
+    assert p1300 is not None
+    assert len(p1300["costTrend"]) == 6
