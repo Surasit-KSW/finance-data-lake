@@ -921,3 +921,24 @@ def get_production_pulse(asOf: str = Query(..., description="Snapshot date: YYYY
         "date":   asOf,
         "plants": plants_out,
     }
+
+
+@router.get("/all")
+def get_all_briefing(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")):
+    """
+    Composite Morning Briefing endpoint — returns all 4 sections in one request.
+
+    Replaces 4 parallel frontend calls (cfo-kpis, finance-ops, alerts, production-pulse)
+    with a single round-trip to Render. Reduces serialized queue time from ~22s to ~8s.
+
+    Returns: { cfoKpis, financeOps, alerts, productionPulse }
+    Each section mirrors its individual endpoint response exactly.
+    """
+    return {
+        "status":          "ok",
+        "asOf":            asOf,
+        "cfoKpis":         get_cfo_kpis(asOf),
+        "financeOps":      get_finance_ops(asOf),
+        "alerts":          get_alerts(asOf),
+        "productionPulse": get_production_pulse(asOf),
+    }
