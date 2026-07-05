@@ -928,17 +928,37 @@ def get_all_briefing(asOf: str = Query(..., description="Snapshot date: YYYY-MM-
     """
     Composite Morning Briefing endpoint — returns all 4 sections in one request.
 
-    Replaces 4 parallel frontend calls (cfo-kpis, finance-ops, alerts, production-pulse)
-    with a single round-trip to Render. Reduces serialized queue time from ~22s to ~8s.
+    Runs all 4 handlers in parallel threads so total latency ≈ max(handler_time),
+    not sum(handler_time). Reduces total time from ~22s (4 serialised requests) to
+    ~10-12s (single request, 4 parallel threads).
 
     Returns: { cfoKpis, financeOps, alerts, productionPulse }
     Each section mirrors its individual endpoint response exactly.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sections = {
+        "cfoKpis":         (get_cfo_kpis,         asOf),
+        "financeOps":      (get_finance_ops,       asOf),
+        "alerts":          (get_alerts,            asOf),
+        "productionPulse": (get_production_pulse,  asOf),
+    }
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(fn, arg): key for key, (fn, arg) in sections.items()}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as exc:
+                results[key] = {"usingMock": True, "error": str(exc)}
+
     return {
         "status":          "ok",
         "asOf":            asOf,
-        "cfoKpis":         get_cfo_kpis(asOf),
-        "financeOps":      get_finance_ops(asOf),
-        "alerts":          get_alerts(asOf),
-        "productionPulse": get_production_pulse(asOf),
+        "cfoKpis":         results.get("cfoKpis",         {}),
+        "financeOps":      results.get("financeOps",      {}),
+        "alerts":          results.get("alerts",          {}),
+        "productionPulse": results.get("productionPulse", {}),
     }
