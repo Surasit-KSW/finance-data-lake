@@ -105,19 +105,41 @@ def _safe_float(val, default: float = 0.0) -> float:
 
 
 def _query_revenue_mtd(year: int, month: int) -> float:
-    """Total revenue THB for year/month from gold_revenue_monthly."""
+    """
+    Total revenue THB for year/month.
+    Primary: gold_revenue_monthly (local DuckDB, most accurate).
+    Fallback: v_gl_summary gl_group='4. Revenue' (Neon/cloud-compatible).
+    SAP convention: Revenue is credit → net_amount negative → abs().
+    """
     try:
         df = query_df(
             "SELECT SUM(revenue_thb) AS total FROM gold_revenue_monthly WHERE year = ? AND month = ?",
             [year, month],
         )
-        return _safe_float(df.iloc[0]["total"]) if not df.empty else 0.0
+        val = _safe_float(df.iloc[0]["total"]) if not df.empty else 0.0
+        if val > 0:
+            return val
+    except Exception:
+        pass
+    # Fallback: v_gl_summary (cloud-compatible)
+    try:
+        df = query_df(
+            """SELECT SUM(net_amount) AS total FROM v_gl_summary
+               WHERE year = ? AND month = ? AND gl_group = '4. Revenue'""",
+            [year, month],
+        )
+        val = _safe_float(df.iloc[0]["total"]) if not df.empty else 0.0
+        return abs(val)   # credit → negative → flip for display
     except Exception:
         return 0.0
 
 
 def _query_gp_mtd(year: int, month: int) -> dict:
-    """GP amount + margin % for year/month from gold_gp_by_plant."""
+    """
+    GP amount + margin % for year/month.
+    Primary: gold_gp_by_plant (local DuckDB).
+    Fallback: v_gl_summary Revenue - COGS (Neon/cloud-compatible).
+    """
     try:
         df = query_df(
             """
@@ -127,10 +149,30 @@ def _query_gp_mtd(year: int, month: int) -> dict:
             """,
             [year, month],
         )
-        if df.empty:
-            return {"rev": 0.0, "gp": 0.0, "margin": None}
-        rev = _safe_float(df.iloc[0]["rev"])
-        gp  = _safe_float(df.iloc[0]["gp"])
+        if not df.empty:
+            rev = _safe_float(df.iloc[0]["rev"])
+            gp  = _safe_float(df.iloc[0]["gp"])
+            if rev > 0:
+                margin = round(gp / rev * 100, 2)
+                return {"rev": rev, "gp": gp, "margin": margin}
+    except Exception:
+        pass
+    # Fallback: v_gl_summary (cloud-compatible)
+    try:
+        df = query_df(
+            """
+            SELECT gl_group, SUM(net_amount) AS total
+            FROM v_gl_summary
+            WHERE year = ? AND month = ?
+              AND gl_group IN ('4. Revenue', '5. COGS')
+            GROUP BY gl_group
+            """,
+            [year, month],
+        )
+        gl_map = {str(row["gl_group"]): _safe_float(row["total"]) for _, row in df.iterrows()}
+        rev  = abs(gl_map.get("4. Revenue", 0.0))   # credit → flip
+        cogs = gl_map.get("5. COGS", 0.0)
+        gp   = rev - cogs
         margin = round(gp / rev * 100, 2) if rev > 0 else None
         return {"rev": rev, "gp": gp, "margin": margin}
     except Exception:
@@ -166,10 +208,12 @@ def _query_prod_volume_mtd(year: int, month: int, plant: str | None = None) -> f
 
 def _query_gl_balance(year: int, month: int, account_prefix: str, ytd: bool = True) -> float:
     """
-    Sum net_amount from v_gl for accounts matching `account_prefix%`.
+    Sum net_amount for accounts matching `account_prefix` (first 2 chars).
     ytd=True → cumulative Jan–month; ytd=False → single month only.
-    Returns absolute value (sign already has SAP convention baked in by caller).
+    Primary: v_gl T1 raw (local DuckDB).
+    Fallback: v_gl_summary with SUBSTRING prefix (Neon/cloud-compatible).
     """
+    # Primary: v_gl (local DuckDB raw transactions)
     month_cond = "CAST(Month AS INTEGER) <= ?" if ytd else "CAST(Month AS INTEGER) = ?"
     try:
         df = query_df(
@@ -183,17 +227,60 @@ def _query_gl_balance(year: int, month: int, account_prefix: str, ytd: bool = Tr
             """,
             ["1000", year, month, f"{account_prefix}%"],
         )
+        val = _safe_float(df.iloc[0]["balance"]) if not df.empty else 0.0
+        if val != 0.0:
+            return val
+    except Exception:
+        pass
+    # Fallback: v_gl_summary (Neon/cloud-compatible)
+    prefix2 = account_prefix[:2]
+    try:
+        if ytd:
+            df = query_df(
+                """
+                SELECT SUM(net_amount) AS balance
+                FROM v_gl_summary
+                WHERE year = ? AND month <= ?
+                  AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) = ?
+                """,
+                [year, month, prefix2],
+            )
+        else:
+            df = query_df(
+                """
+                SELECT SUM(net_amount) AS balance
+                FROM v_gl_summary
+                WHERE year = ? AND month = ?
+                  AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) = ?
+                """,
+                [year, month, prefix2],
+            )
         return _safe_float(df.iloc[0]["balance"]) if not df.empty else 0.0
     except Exception:
         return 0.0
 
 
 def _query_gl_entry_count(year: int, month: int) -> int:
-    """Count of GL entries for year/month (all accounts)."""
+    """
+    Count of GL entries for year/month.
+    Primary: v_gl T1 raw (local DuckDB).
+    Fallback: v_gl_summary row count (Neon/cloud-compatible).
+    """
     try:
         df = query_df(
             "SELECT COUNT(*) AS cnt FROM v_gl WHERE company_code = ? AND CAST(Year AS INTEGER) = ? AND CAST(Month AS INTEGER) = ?",
             ["1000", year, month],
+        )
+        val = int(_safe_float(df.iloc[0]["cnt"])) if not df.empty else 0
+        if val > 0:
+            return val
+    except Exception:
+        pass
+    # Fallback: v_gl_summary (Neon/cloud-compatible)
+    try:
+        df = query_df(
+            "SELECT COUNT(*) AS cnt FROM v_gl_summary WHERE year = ? AND month = ?",
+            [year, month],
         )
         return int(_safe_float(df.iloc[0]["cnt"])) if not df.empty else 0
     except Exception:
@@ -244,6 +331,44 @@ def _compute_dso(ar_balance: float, revenue_mtd: float, fiscal_day: int) -> floa
     if daily_revenue <= 0:
         return None
     return round(ar_balance / daily_revenue, 1)
+
+
+def _resolve_data_month(year: int, month: int) -> tuple[int, int]:
+    """
+    Return the latest (year, month) that has actual revenue data.
+    Walks back up to 6 months to find the most recent month with data.
+    Prevents endpoints from returning usingMock=True just because the current
+    calendar month hasn't been loaded yet (e.g., July 4 but June is latest).
+
+    Priority: v_gl_summary (more up-to-date, Neon/cloud-compatible)
+              then gold_revenue_monthly (local DuckDB enrichment).
+    """
+    for m_offset in range(7):
+        y, m = year, month - m_offset
+        while m <= 0:
+            m += 12
+            y -= 1
+        # Check v_gl_summary first — available on both DuckDB and Neon, more recent data
+        try:
+            df = query_df(
+                "SELECT COUNT(*) AS cnt FROM v_gl_summary WHERE year = ? AND month = ? AND gl_group = '4. Revenue'",
+                [y, m],
+            )
+            if not df.empty and int(_safe_float(df.iloc[0]["cnt"])) > 0:
+                return y, m
+        except Exception:
+            pass
+        # Also try gold_revenue_monthly (local DuckDB)
+        try:
+            df = query_df(
+                "SELECT COUNT(*) AS cnt FROM gold_revenue_monthly WHERE year = ? AND month = ?",
+                [y, m],
+            )
+            if not df.empty and int(_safe_float(df.iloc[0]["cnt"])) > 0:
+                return y, m
+        except Exception:
+            pass
+    return year, month  # fallback: caller will get 0s and handle accordingly
 
 
 def _query_plant_unit_costs(year: int, month: int) -> dict[str, dict]:
@@ -335,8 +460,13 @@ def get_cfo_kpis(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
       - arOutstanding.overdueGt60, dso  (needs AR aging detail table)
     """
     d = _parse_date(asOf)
-    year, month = d.year, d.month
-    fiscal_day    = d.day
+    req_year, req_month = d.year, d.month
+
+    # Resolve to latest month with actual data (handles "today is Jul 4 but data is Jun")
+    year, month = _resolve_data_month(req_year, req_month)
+    data_as_of  = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+
+    fiscal_day    = d.day if (year == req_year and month == req_month) else calendar.monthrange(year, month)[1]
     days_in_month = calendar.monthrange(year, month)[1]
 
     # Revenue MTD
@@ -384,6 +514,7 @@ def get_cfo_kpis(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
     return {
         "status":       "ok",
         "asOf":         asOf,
+        "dataAsOf":     data_as_of,        # actual data period used (may be prior month)
         "fiscalDay":    fiscal_day,
         "daysInMonth":  days_in_month,
         "usingMock":    not has_live_data,
@@ -454,8 +585,9 @@ def get_finance_ops(asOf: str = Query(..., description="Snapshot date: YYYY-MM-D
       - closeTasks (SAP process statuses)
     """
     d = _parse_date(asOf)
-    year, month = d.year, d.month
-    fiscal_day    = d.day
+    req_year, req_month = d.year, d.month
+    year, month   = _resolve_data_month(req_year, req_month)
+    fiscal_day    = d.day if (year == req_year and month == req_month) else calendar.monthrange(year, month)[1]
     days_in_month = calendar.monthrange(year, month)[1]
 
     # Month-end close progress: estimate from fiscal day
@@ -731,7 +863,8 @@ def get_production_pulse(asOf: str = Query(..., description="Snapshot date: YYYY
       on-track  — otherwise
     """
     d = _parse_date(asOf)
-    year, month = d.year, d.month
+    req_year, req_month = d.year, d.month
+    year, month = _resolve_data_month(req_year, req_month)
 
     # Current month per-plant data
     current_costs = _query_plant_unit_costs(year, month)
