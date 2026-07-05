@@ -41,7 +41,7 @@ def _load_parquet(name: str) -> pd.DataFrame | None:
     df = pd.read_parquet(path)
     for col in ('date', 'start_date', 'maturity_date'):
         if col in df.columns:
-            df[col] = df[col].astype(str).replace({'NaT': None, 'None': None, 'nan': None})
+            df[col] = df[col].astype(str).replace({'NaT': '', 'None': '', 'nan': ''})
     return df
 
 
