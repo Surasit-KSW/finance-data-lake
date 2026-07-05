@@ -21,6 +21,12 @@ router = APIRouter(prefix="/api/v1/data-lake", tags=["Data Lake v1"])
 
 # ─── Shared Helpers ───────────────────────────────────────────────────────────
 
+def _norm_cols(df):
+    """Lowercase all column names except 'G/L Account' (contains slash)."""
+    df.columns = [c.lower() if c != "G/L Account" else c for c in df.columns]
+    return df
+
+
 def _safe_float(val, default: float = 0.0) -> float:
     """Convert val to float; return default for None/NaN/Inf."""
     try:
@@ -128,10 +134,11 @@ def get_fpa_summary(year: int = Query(2026)):
     """
     12-month Actual vs Prior Year P&L for FP&A page top section.
 
-    Revenue  ← v_gl_summary GL_Group = '4. Revenue' (negated — SAP credit convention)
-    COGS     ← v_gl_summary GL_Group = '5. COGS'
-    Opex     ← v_gl_summary GL_Group IN ('6. Selling Exp', '7. Admin Exp')
-    Prior Yr ← same queries with year-1
+    Single batch query for each year — avoids 60 round-trips on cloud (Neon).
+    Revenue  ← GL_Group = '4. Revenue' (negated — SAP credit convention)
+    COGS     ← GL_Group = '5. COGS'
+    Opex     ← GL_Group IN ('6. Selling Exp', '7. Admin Exp')
+    Prior Yr ← same single query with year-1
 
     Cloud-compatible: v_gl_summary available on both DuckDB and Neon.
     Future months (month > today for current year) → all numeric fields null.
@@ -139,8 +146,37 @@ def get_fpa_summary(year: int = Query(2026)):
     try:
         query_df("SELECT 1", [])
         today = date.today()
-        months_out = []
 
+        # ── Single query for current year ────────────────────────────────────
+        batch_sql = """
+            SELECT
+                month,
+                gl_group,
+                SUM(net_amount) AS total
+            FROM v_gl_summary
+            WHERE year = ?
+              AND gl_group IN ('4. Revenue', '5. COGS', '6. Selling Exp', '7. Admin Exp')
+            GROUP BY month, gl_group
+            ORDER BY month
+        """
+        cur_df  = _norm_cols(query_df(batch_sql, [year]))
+        py_df   = _norm_cols(query_df(batch_sql, [year - 1]))
+
+        # Build lookup: (month, gl_group) → sum
+        def _build_map(df):
+            m = {}
+            for _, row in df.iterrows():
+                key = (int(row["month"]), str(row["gl_group"]))
+                m[key] = _safe_float(row["total"])
+            return m
+
+        cur_map = _build_map(cur_df)
+        py_map  = _build_map(py_df)
+
+        def _get(lookup, month, group):
+            return lookup.get((month, group), 0.0)
+
+        months_out = []
         for month in range(1, 13):
             is_future = year > today.year or (year == today.year and month > today.month)
             if is_future:
@@ -152,26 +188,28 @@ def get_fpa_summary(year: int = Query(2026)):
                 continue
 
             try:
-                revenue      = _revenue(year, month)
-                cogs         = _gl_summary_amount(year, month, "5. COGS")
-                opex         = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
-                py_revenue   = _revenue(year - 1, month)
-                py_cogs      = _gl_summary_amount(year - 1, month, "5. COGS")
+                revenue  = abs(_get(cur_map, month, "4. Revenue"))   # negate SAP credit
+                cogs     = _get(cur_map, month, "5. COGS")
+                opex     = (_get(cur_map, month, "6. Selling Exp")
+                           + _get(cur_map, month, "7. Admin Exp"))
 
-                gross_profit    = revenue - cogs
-                py_gross_profit = py_revenue - py_cogs
+                py_revenue = abs(_get(py_map, month, "4. Revenue"))
+                py_cogs    = _get(py_map, month, "5. COGS")
+
+                gp    = revenue - cogs
+                py_gp = py_revenue - py_cogs
 
                 months_out.append({
                     "month":       month,
                     "revenue":     round(revenue, 2),
                     "cogs":        round(cogs, 2),
-                    "grossProfit": round(gross_profit, 2),
-                    "gpMargin":    round(gross_profit / revenue * 100, 2) if revenue > 0 else None,
+                    "grossProfit": round(gp, 2),
+                    "gpMargin":    round(gp / revenue * 100, 2) if revenue > 0 else None,
                     "opex":        round(opex, 2),
-                    "ebit":        round(gross_profit - opex, 2),
+                    "ebit":        round(gp - opex, 2),
                     "priorYear": {
                         "revenue":  round(py_revenue, 2),
-                        "gpMargin": round(py_gross_profit / py_revenue * 100, 2) if py_revenue > 0 else None,
+                        "gpMargin": round(py_gp / py_revenue * 100, 2) if py_revenue > 0 else None,
                     },
                 })
             except Exception:
@@ -202,35 +240,35 @@ def get_fpa_variance(year: int = Query(2026), month: int = Query(7)):
     """
     period = f"{year:04d}-{month:02d}"
     try:
-        actual_df = query_df(
+        actual_df = _norm_cols(query_df(
             """
             SELECT
                 "G/L Account"              AS gl_account,
-                MAX("GL_Name")             AS gl_name,
-                SUM("Net_Amount")          AS actual
+                MAX(gl_name)               AS gl_name,
+                SUM(net_amount)            AS actual
             FROM v_gl_summary
-            WHERE CAST("Year" AS INTEGER) = ?
-              AND CAST("Month" AS INTEGER) = ?
-              AND "GL_Group" = '5. COGS'
+            WHERE year = ?
+              AND month = ?
+              AND gl_group = '5. COGS'
             GROUP BY "G/L Account"
-            ORDER BY SUM("Net_Amount") DESC
+            ORDER BY SUM(net_amount) DESC
             """,
             [year, month],
-        )
+        ))
 
-        baseline_df = query_df(
+        baseline_df = _norm_cols(query_df(
             """
             SELECT
                 "G/L Account"              AS gl_account,
-                SUM("Net_Amount")          AS baseline
+                SUM(net_amount)            AS baseline
             FROM v_gl_summary
-            WHERE CAST("Year" AS INTEGER) = ?
-              AND CAST("Month" AS INTEGER) = ?
-              AND "GL_Group" = '5. COGS'
+            WHERE year = ?
+              AND month = ?
+              AND gl_group = '5. COGS'
             GROUP BY "G/L Account"
             """,
             [year - 1, month],
-        )
+        ))
 
         baseline_map = {}
         for _, row in baseline_df.iterrows():
@@ -290,40 +328,85 @@ def get_treasury(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
 
         query_df("SELECT 1", [])
 
-        # Cash (accounts 11*, YTD cumulative)
-        cash = abs(_gl_summary_prefix(year, month, "11", ytd=True))
+        # ── Batch query 1: balance sheet accounts (11/12/21/22) by month ────
+        # One query replaces 10+ individual prefix calls.
+        bs_df = _norm_cols(query_df(
+            """
+            SELECT
+                SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) AS prefix,
+                month,
+                SUM(net_amount) AS monthly
+            FROM v_gl_summary
+            WHERE year = ?
+              AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) IN ('11','12','21','22')
+            GROUP BY prefix, month
+            ORDER BY prefix, month
+            """,
+            [year],
+        ))
 
-        # AR (accounts 12*, YTD cumulative)
-        ar = abs(_gl_summary_prefix(year, month, "12", ytd=True))
+        # Build prefix → {month: monthly_amount} lookup
+        prefix_monthly: dict = {}
+        for _, row in bs_df.iterrows():
+            pfx = str(row["prefix"])
+            mo  = int(row["month"])
+            prefix_monthly.setdefault(pfx, {})[mo] = _safe_float(row["monthly"])
 
-        # AP (accounts 21* + 22*, YTD cumulative)
-        ap = (
-            abs(_gl_summary_prefix(year, month, "21", ytd=True))
-            + abs(_gl_summary_prefix(year, month, "22", ytd=True))
-        )
+        def _ytd(prefix: str, up_to_month: int) -> float:
+            return sum(
+                prefix_monthly.get(prefix, {}).get(m, 0.0)
+                for m in range(1, up_to_month + 1)
+            )
 
-        # NWC = AR + Cash - AP
-        nwc = ar + cash - ap
+        # ── Batch query 2: P&L groups for current month ─────────────────────
+        pl_df = _norm_cols(query_df(
+            """
+            SELECT gl_group, SUM(net_amount) AS total
+            FROM v_gl_summary
+            WHERE year = ?
+              AND month = ?
+              AND gl_group IN ('4. Revenue', '5. COGS', '6. Selling Exp', '7. Admin Exp')
+            GROUP BY gl_group
+            """,
+            [year, month],
+        ))
+        pl_map = {str(row["gl_group"]): _safe_float(row["total"]) for _, row in pl_df.iterrows()}
 
-        # Monthly opex for burn rate / runway
-        opex_monthly = _gl_summary_amount(year, month, ["6. Selling Exp", "7. Admin Exp"])
-        nwc_runway = round(nwc / opex_monthly, 1) if opex_monthly > 0 else None
+        # ── Derived balances ─────────────────────────────────────────────────
+        cash = abs(_ytd("11", month))
+        ar   = abs(_ytd("12", month))
+        ap   = abs(_ytd("21", month)) + abs(_ytd("22", month))
+        nwc  = ar + cash - ap
 
-        # DSO = AR / daily sales
-        revenue_mtd = _revenue(year, month)
-        daily_sales = revenue_mtd / fiscal_day if fiscal_day > 0 and revenue_mtd > 0 else None
-        dso = round(ar / daily_sales, 1) if daily_sales else None
+        opex_monthly = (pl_map.get("6. Selling Exp", 0.0) + pl_map.get("7. Admin Exp", 0.0))
+        nwc_runway   = round(nwc / opex_monthly, 1) if opex_monthly > 0 else None
 
-        # DPO = AP / daily COGS
-        cogs_mtd = abs(_gl_summary_amount(year, month, "5. COGS"))
-        daily_cogs = cogs_mtd / fiscal_day if fiscal_day > 0 and cogs_mtd > 0 else None
-        dpo = round(ap / daily_cogs, 1) if daily_cogs else None
+        revenue_mtd  = abs(pl_map.get("4. Revenue", 0.0))
+        daily_sales  = revenue_mtd / fiscal_day if fiscal_day > 0 and revenue_mtd > 0 else None
+        dso          = round(ar / daily_sales, 1) if daily_sales else None
 
-        # 6-month cash trend
+        cogs_mtd    = abs(pl_map.get("5. COGS", 0.0))
+        daily_cogs  = cogs_mtd / fiscal_day if fiscal_day > 0 and cogs_mtd > 0 else None
+        dpo         = round(ap / daily_cogs, 1) if daily_cogs else None
+
+        # ── 6-month cash trend (no extra queries — use prefix_monthly) ───────
         trend6m = []
         y, m = year, month
         for _ in range(6):
-            bal = abs(_gl_summary_prefix(y, m, "11", ytd=True))
+            # YTD cash balance for month m in year y
+            if y == year:
+                bal = abs(_ytd("11", m))
+            else:
+                # Need prior-year data — fall back to point-in-time query
+                bal_df = query_df(
+                    """
+                    SELECT SUM(net_amount) AS balance FROM v_gl_summary
+                    WHERE year = ? AND month <= ?
+                      AND SUBSTRING(CAST("G/L Account" AS VARCHAR) FROM 1 FOR 2) = '11'
+                    """,
+                    [y, m],
+                )
+                bal = abs(_safe_float(bal_df.iloc[0]["balance"])) if not bal_df.empty else 0.0
             trend6m.append({"month": f"{y:04d}-{m:02d}", "balance": round(bal, 2)})
             m -= 1
             if m == 0:
