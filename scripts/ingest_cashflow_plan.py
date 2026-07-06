@@ -52,7 +52,9 @@ def main():
             print(f"  OK    {name}")
             copied += 1
 
-    if args.run_etl and not args.dry_run and copied > 0:
+    # Count files that exist in Bronze (newly copied + already present)
+    bronze_files = list(BRONZE.glob("cashflow_plan_*.xlsx"))
+    if args.run_etl and not args.dry_run and bronze_files:
         etl = LAKE_ROOT / "04_Data_Pipelines" / "silver_transform" / "etl_cashflow_plan.py"
         subprocess.run([sys.executable, str(etl)], cwd=str(LAKE_ROOT), check=False)
 

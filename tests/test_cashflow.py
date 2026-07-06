@@ -4,6 +4,7 @@ import pandas as pd
 import openpyxl
 from pathlib import Path
 from datetime import date
+from silver_transform.etl_cashflow_plan import CashflowPlanETL
 
 # ── ETL Tests ────────────────────────────────────────────────────────────────
 
@@ -23,10 +24,6 @@ def tmp_bronze(tmp_path):
 
 def test_etl_cashflow_plan_happy_path(tmp_bronze, tmp_path):
     """ETL converts valid Excel rows to parquet with correct schema."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from silver_transform.etl_cashflow_plan import CashflowPlanETL  # noqa: E402  (path set above)
-
     silver = tmp_path / "silver"
     silver.mkdir()
     etl = CashflowPlanETL(bronze_path=tmp_bronze, silver_path=silver, year=2026)
@@ -45,10 +42,6 @@ def test_etl_cashflow_plan_happy_path(tmp_bronze, tmp_path):
 
 def test_etl_cashflow_plan_missing_file(tmp_path):
     """ETL returns status='skipped' and 0 rows when Bronze file absent."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from silver_transform.etl_cashflow_plan import CashflowPlanETL
-
     silver = tmp_path / "silver"
     silver.mkdir()
     bronze = tmp_path / "empty_bronze"
