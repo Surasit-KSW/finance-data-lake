@@ -144,6 +144,7 @@ def get_cashflow_plan(
             FROM v_ap
             WHERE company_code = ?
               AND TRY_CAST("Posting Date" AS DATE) BETWEEN ? AND ?
+              AND TRY_CAST("Net_Amount" AS DOUBLE) > 0
             """,
             ["1000", from_date, to_date],
         )
@@ -203,11 +204,11 @@ def get_cashflow_plan(
         manual = _load_parquet_safe(f"cashflow_plan_{year}.parquet")
         if not manual.empty:
             mask = manual["date"].apply(lambda d: bool(d and from_date <= d <= to_date))
-            for _, r in manual[mask].iterrows():
+            for idx, (_, r) in enumerate(manual[mask].iterrows()):
                 t = str(r.get("type", ""))
                 item_type = "manual_in" if t == "receipt" else "manual_out"
                 items.append({
-                    "id":           f"manual-{uuid.uuid4().hex[:8]}",
+                    "id":           f"manual-{r['date']}-{idx}",
                     "date":         str(r["date"]),
                     "type":         item_type,
                     "source":       "manual",
