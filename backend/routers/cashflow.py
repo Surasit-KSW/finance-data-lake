@@ -219,8 +219,10 @@ def get_cashflow_plan(
     opening = 0.0
     try:
         banks = _load_parquet_safe("treasury_banks_2026.parquet")
-        if not banks.empty and "balance" in banks.columns:
-            opening = round(float(banks["balance"].sum()), 2)
+        if not banks.empty:
+            bal_col = "balance_thb" if "balance_thb" in banks.columns else "balance"
+            if bal_col in banks.columns:
+                opening = round(float(banks[bal_col].sum()), 2)
     except Exception:
         pass
 
