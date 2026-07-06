@@ -77,6 +77,13 @@ def get_cashflow_plan(
     from_date: str = Query(..., alias="from", description="Start date YYYY-MM-DD"),
     to_date:   str = Query(..., alias="to",   description="End date YYYY-MM-DD"),
 ):
+    from fastapi import HTTPException
+    try:
+        date.fromisoformat(from_date)
+        date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
     today = date.today()
     items: list[dict] = []
 
@@ -99,15 +106,14 @@ def get_cashflow_plan(
             """,
             ["1000", from_date, to_date],
         )
-        cols = set(ar.columns)
         for _, r in ar.iterrows():
-            # Support both SQL-aliased names and original column names
-            due    = _to_date_str(r.get("due_date") if "due_date" in cols else r.get("Net Due Date"))
-            clr    = _to_date_str(r.get("clearing_date") if "clearing_date" in cols else r.get("Clearing Date"))
+            # Use SQL-aliased column names only
+            due    = _to_date_str(r.get("due_date"))
+            clr    = _to_date_str(r.get("clearing_date"))
             status = _item_status(due, clr, today)
-            doc_no = (r.get("doc_no") if "doc_no" in cols else r.get("Document Number")) or uuid.uuid4().hex[:8]
-            amount = r.get("amount") if "amount" in cols else r.get("Company Code Currency Value")
-            cparty = (r.get("customer_name") if "customer_name" in cols else None) or (r.get("Customer Account: Name 1") if "Customer Account: Name 1" in cols else None) or r.get("customer") or r.get("Customer") or ""
+            doc_no = r.get("doc_no") or uuid.uuid4().hex[:8]
+            amount = r.get("amount")
+            cparty = r.get("customer_name") or r.get("customer") or ""
             items.append({
                 "id":           f"ar-{doc_no}",
                 "date":         due or from_date,
@@ -141,17 +147,16 @@ def get_cashflow_plan(
             """,
             ["1000", from_date, to_date],
         )
-        ap_cols = set(ap.columns)
         for _, r in ap.iterrows():
-            # Support both SQL-aliased names and original column names
-            due    = _to_date_str(r.get("posting_date") if "posting_date" in ap_cols else r.get("Posting Date"))
-            raw_amt = r.get("amount") if "amount" in ap_cols else r.get("Net_Amount")
+            # Use SQL-aliased column names only
+            due    = _to_date_str(r.get("posting_date"))
+            raw_amt = r.get("amount")
             amt    = _safe_float(raw_amt)
             # AP amounts in v_ap may be positive or negative depending on SAP export;
             # ensure payments are stored as negative
             amount_thb = -abs(amt) if amt != 0 else 0.0
-            doc_no = (r.get("doc_no") if "doc_no" in ap_cols else r.get("Document Number")) or uuid.uuid4().hex[:8]
-            cparty = (r.get("vendor_name") if "vendor_name" in ap_cols else None) or (r.get("Vendor Account: Name 1") if "Vendor Account: Name 1" in ap_cols else None) or r.get("vendor") or r.get("Vendor") or ""
+            doc_no = r.get("doc_no") or uuid.uuid4().hex[:8]
+            cparty = r.get("vendor_name") or r.get("vendor") or ""
             items.append({
                 "id":           f"ap-{doc_no}",
                 "date":         due or from_date,
@@ -179,7 +184,7 @@ def get_cashflow_plan(
             for _, r in pos[mask].iterrows():
                 amt = _safe_float(r.get("amount_thb", 0))
                 items.append({
-                    "id":           f"treasury-{r.get('product','')}-{r.get('bank','')}",
+                    "id":           f"treasury-{r.get('product','')}-{r.get('bank','')}-{r.get('maturity_date','')[:10]}",
                     "date":         str(r["maturity_date"]),
                     "type":         "treasury",
                     "source":       "auto",

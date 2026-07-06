@@ -68,24 +68,24 @@ TO_DATE   = TODAY
 
 def _ar_df():
     return pd.DataFrame([{
-        "Customer":                    "CUST001",
-        "Customer Account: Name 1":    "บ.ABC จำกัด",
-        "Net Due Date":                pd.Timestamp(TODAY),
-        "Company Code Currency Value": 12_500_000.0,
-        "Document Number":             "1800000001",
-        "Clearing Date":               pd.Timestamp(TODAY),
-        "company_code":                "1000",
+        "customer":       "CUST001",
+        "customer_name":  "บ.ABC จำกัด",
+        "due_date":        pd.Timestamp(TODAY),
+        "amount":          12_500_000.0,
+        "doc_no":          "1800000001",
+        "clearing_date":   pd.Timestamp(TODAY),
+        "company_code":    "1000",
     }])
 
 
 def _ap_df():
     return pd.DataFrame([{
-        "Vendor":                  "VEND001",
-        "Vendor Account: Name 1":  "บ.XYZ จำกัด",
-        "Posting Date":            pd.Timestamp(TODAY),
-        "Net_Amount":              -8_200_000.0,
-        "Document Number":         "1900000001",
-        "company_code":            "1000",
+        "vendor":         "VEND001",
+        "vendor_name":    "บ.XYZ จำกัด",
+        "posting_date":   pd.Timestamp(TODAY),
+        "amount":         -8_200_000.0,
+        "doc_no":         "1900000001",
+        "company_code":   "1000",
     }])
 
 
