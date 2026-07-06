@@ -50,3 +50,89 @@ def test_etl_cashflow_plan_missing_file(tmp_path):
     result = etl.run()
     assert result["status"] == "skipped"
     assert result["rows"] == 0
+
+
+# ── Router Tests ─────────────────────────────────────────────────────────────
+
+import pandas as pd
+from unittest.mock import patch
+from fastapi.testclient import TestClient
+from backend.main import app
+
+client = TestClient(app)
+
+TODAY = date.today().isoformat()
+FROM_DATE = TODAY
+TO_DATE   = TODAY
+
+
+def _ar_df():
+    return pd.DataFrame([{
+        "Customer":                    "CUST001",
+        "Customer Account: Name 1":    "บ.ABC จำกัด",
+        "Net Due Date":                pd.Timestamp(TODAY),
+        "Company Code Currency Value": 12_500_000.0,
+        "Document Number":             "1800000001",
+        "Clearing Date":               pd.Timestamp(TODAY),
+        "company_code":                "1000",
+    }])
+
+
+def _ap_df():
+    return pd.DataFrame([{
+        "Vendor":                  "VEND001",
+        "Vendor Account: Name 1":  "บ.XYZ จำกัด",
+        "Posting Date":            pd.Timestamp(TODAY),
+        "Net_Amount":              -8_200_000.0,
+        "Document Number":         "1900000001",
+        "company_code":            "1000",
+    }])
+
+
+def test_cashflow_plan_returns_items():
+    """Router returns items list + opening_balance with correct types."""
+    with patch("backend.routers.cashflow.query_df") as mock_qdf, \
+         patch("backend.routers.cashflow._load_parquet_safe", return_value=pd.DataFrame()):
+        mock_qdf.side_effect = lambda sql, *a, **kw: (
+            _ar_df() if "v_ar" in sql else _ap_df()
+        )
+        resp = client.get(f"/api/v1/cashflow/plan?from={FROM_DATE}&to={TO_DATE}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "opening_balance" in body
+    assert "items" in body
+    assert isinstance(body["items"], list)
+    assert body["usingMock"] is False
+
+
+def test_cashflow_plan_ar_status_actual():
+    """AR item with Clearing Date ≤ today → status='actual'."""
+    with patch("backend.routers.cashflow.query_df") as mock_qdf, \
+         patch("backend.routers.cashflow._load_parquet_safe", return_value=pd.DataFrame()):
+        mock_qdf.side_effect = lambda sql, *a, **kw: (
+            _ar_df() if "v_ar" in sql else pd.DataFrame()
+        )
+        resp = client.get(f"/api/v1/cashflow/plan?from={FROM_DATE}&to={TO_DATE}")
+
+    items = resp.json()["items"]
+    ar_items = [i for i in items if i["type"] == "ar"]
+    assert len(ar_items) == 1
+    assert ar_items[0]["status"] == "actual"
+    assert ar_items[0]["amount_thb"] > 0
+
+
+def test_cashflow_plan_ap_always_plan():
+    """AP items from v_ap (no clearing info) → status='plan'."""
+    with patch("backend.routers.cashflow.query_df") as mock_qdf, \
+         patch("backend.routers.cashflow._load_parquet_safe", return_value=pd.DataFrame()):
+        mock_qdf.side_effect = lambda sql, *a, **kw: (
+            pd.DataFrame() if "v_ar" in sql else _ap_df()
+        )
+        resp = client.get(f"/api/v1/cashflow/plan?from={FROM_DATE}&to={TO_DATE}")
+
+    items = resp.json()["items"]
+    ap_items = [i for i in items if i["type"] == "ap"]
+    assert len(ap_items) == 1
+    assert ap_items[0]["status"] == "plan"
+    assert ap_items[0]["amount_thb"] < 0
