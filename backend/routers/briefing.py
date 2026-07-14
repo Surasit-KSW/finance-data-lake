@@ -31,10 +31,12 @@ Limitations / Phase 2 roadmap:
   - Finance Calendar: static config (Phase 2: Google Calendar API)
 """
 import calendar
+import json
 import math
 from datetime import date
 from fastapi import APIRouter, Query, HTTPException
 from backend.services.db_service import query_df
+from backend.routers.close import _status_path
 
 router = APIRouter(prefix="/api/v1/briefing", tags=["Briefing v1"])
 
@@ -566,6 +568,20 @@ def get_cfo_kpis(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")
     }
 
 
+def _read_close_cache() -> list:
+    """Read close_tasks from the close orchestrator's status cache (see
+    backend.routers.close), or [] if no tick has ever run / file missing.
+    """
+    path = _status_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("close_tasks", [])
+    except Exception:
+        return []
+
+
 @router.get("/finance-ops")
 def get_finance_ops(asOf: str = Query(..., description="Snapshot date: YYYY-MM-DD")):
     """
@@ -670,7 +686,7 @@ def get_finance_ops(asOf: str = Query(..., description="Snapshot date: YYYY-MM-D
 
         # Close task statuses require live SAP connection — return empty for now
         # Phase 2: wire to SAP process monitoring or a dedicated task-tracking table
-        "closeTasks": [],
+        "closeTasks": _read_close_cache(),
     }
 
 

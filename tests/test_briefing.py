@@ -13,6 +13,7 @@ _query_gl_entry_count, _query_prod_volume_mtd, _query_plant_unit_costs)
 that each call query_df internally. We patch query_df at the module level
 and verify that at least one call includes company_code='1000' in params.
 """
+import json
 import pytest
 from unittest.mock import patch, call
 import pandas as pd
@@ -221,6 +222,40 @@ def test_finance_ops_response_shape(mock_query_df):
     assert "progressPct" in result["monthEndClose"]
     assert "daysLeft" in result["monthEndClose"]
     assert "totalEntries" in result["glStatus"]
+
+
+@patch("backend.routers.briefing._status_path")
+@patch("backend.routers.briefing.query_df")
+def test_finance_ops_close_tasks_reads_from_cache(mock_query_df, mock_status_path, tmp_path):
+    """closeTasks should come from the close orchestrator's status cache, not a hardcoded []."""
+    cache_file = tmp_path / "close_status_current.json"
+    cache_file.write_text(json.dumps({
+        "close_tasks": [
+            {"id": "tb_balanced", "name": "Trial Balance สมดุล", "status": "done",
+             "time": "13:00", "linkTo": "/finance/close-control-tower"},
+        ],
+    }), encoding="utf-8")
+    mock_status_path.return_value = cache_file
+    mock_query_df.side_effect = [_gl_count_df(800), _gl_balance_df(120_000_000.0)]
+
+    result = get_finance_ops(asOf="2026-06-30")
+
+    assert result["closeTasks"] == [
+        {"id": "tb_balanced", "name": "Trial Balance สมดุล", "status": "done",
+         "time": "13:00", "linkTo": "/finance/close-control-tower"},
+    ]
+
+
+@patch("backend.routers.briefing._status_path")
+@patch("backend.routers.briefing.query_df")
+def test_finance_ops_close_tasks_empty_when_cache_missing(mock_query_df, mock_status_path, tmp_path):
+    """No tick has ever run (or the cache file was deleted) → closeTasks falls back to []."""
+    mock_status_path.return_value = tmp_path / "does_not_exist.json"
+    mock_query_df.side_effect = [_gl_count_df(800), _gl_balance_df(120_000_000.0)]
+
+    result = get_finance_ops(asOf="2026-06-30")
+
+    assert result["closeTasks"] == []
 
 
 # ─── Tests: get_alerts ─────────────────────────────────────────────────────────
