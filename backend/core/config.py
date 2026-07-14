@@ -29,6 +29,10 @@ class Settings(BaseSettings):
         return self.PROJECT_ROOT / "operations.db"
 
     @property
+    def OPS_STATUS_DIR(self) -> Path:
+        return self.PROJECT_ROOT / "05_Ops_Status"
+
+    @property
     def SILVER(self) -> Path:
         return self.PROJECT_ROOT / "02_Silver_Cleaned"
 
