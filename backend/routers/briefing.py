@@ -27,7 +27,7 @@ Limitations / Phase 2 roadmap:
   - AR overdueGt60 / DSO: needs AR aging detail table → null in Phase 1
   - glStatus.errors / pendingApproval: SAP operational status, not in analytics → null
   - bankMatching: needs bank statement table → null
-  - closeTasks: SAP workflow status → static template
+  - closeTasks: wired to close orchestrator status cache (see routers/close.py)
   - Finance Calendar: static config (Phase 2: Google Calendar API)
 """
 import calendar
@@ -684,8 +684,6 @@ def get_finance_ops(asOf: str = Query(..., description="Snapshot date: YYYY-MM-D
             "linkTo":        "/finance/working-capital",
         },
 
-        # Close task statuses require live SAP connection — return empty for now
-        # Phase 2: wire to SAP process monitoring or a dedicated task-tracking table
         "closeTasks": _read_close_cache(),
     }
 

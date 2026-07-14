@@ -88,8 +88,8 @@ def get_close_status():
     """Return the latest tick's full state, or a safe placeholder if none exists yet."""
     path = _status_path()
     if not path.exists():
-        return NEVER_RUN_STATUS
+        return {**NEVER_RUN_STATUS}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return NEVER_RUN_STATUS
+        return {**NEVER_RUN_STATUS}
