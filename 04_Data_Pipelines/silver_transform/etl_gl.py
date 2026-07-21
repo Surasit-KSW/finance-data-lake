@@ -4,6 +4,7 @@ etl_gl.py — Bronze → Silver: GL Transactions ETL
 
 Output: 02_Silver_Cleaned/master_gl_{company_code}.parquet
 """
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -23,6 +24,28 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 PROJECT_ROOT = PIPELINES_DIR.parent
+
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}")
+
+
+def _parse_posting_dates(series: pd.Series) -> pd.Series:
+    """pd.read_excel(dtype=str) (used by upsert_file) turns native Excel date
+    cells into ISO strings ("2026-04-07 00:00:00"). ISO is already unambiguous
+    (year first) -- but pd.to_datetime(..., dayfirst=True) still silently swaps
+    month/day whenever day<=12 and month!=day (e.g. "2026-04-07" -> 2026-07-04).
+    Only apply dayfirst=True to genuine DD.MM.YYYY / DD/MM/YYYY text exports.
+    Same bug/fix as cashflow/etl_fbl.py::_to_date."""
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series
+    s = series.astype(str).str.strip()
+    is_iso = s.str.match(_ISO_DATE_RE)
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if is_iso.any():
+        parsed.loc[is_iso] = pd.to_datetime(s.loc[is_iso], dayfirst=False, errors="coerce")
+    if (~is_iso).any():
+        parsed.loc[~is_iso] = pd.to_datetime(s.loc[~is_iso], dayfirst=True, errors="coerce")
+    return parsed
 
 
 class GLTransformETL(BaseSilverETL):
@@ -68,7 +91,7 @@ class GLTransformETL(BaseSilverETL):
         # Derive Year/Month from Posting Date
         date_col = next((c for c in df.columns if "POSTING DATE" in c.upper()), None)
         if date_col and "Year" not in df.columns:
-            dates = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+            dates = _parse_posting_dates(df[date_col])
             df["Year"] = dates.dt.year.astype("Int64")
             df["Month"] = dates.dt.month.astype("Int64")
             print(f"   info  Derived Year/Month from '{date_col}'")
@@ -131,13 +154,31 @@ def upsert_file(file_path: Path, company_name: str = "AMC") -> None:
     out = etl._output_path()
     if out.exists():
         df_existing = pd.read_parquet(out)
-        mask = (df_existing["Year"].astype(int) == year) & (df_existing["Month"].astype(int) == month)
+        # A handful of pre-existing rows can have NA Year/Month (blank posting date in
+        # a prior export) -- astype(int) on those raises, so compare via the nullable
+        # Int64 dtype instead (NA == year evaluates to False/pd.NA, never crashes).
+        mask = (df_existing["Year"].astype("Int64") == year) & (df_existing["Month"].astype("Int64") == month)
+        mask = mask.fillna(False)
         dropped = mask.sum()
         df_existing = df_existing[~mask]
         if dropped:
             print(f"  🗑  ลบ {dropped:,} rows เดิม (month={month} year={year})")
     else:
         df_existing = pd.DataFrame()
+
+    # upsert_file reads the incoming Bronze file with dtype=str, but the original
+    # full-company bulk load let pandas infer dtypes (openpyxl auto-parses numeric-
+    # looking cells to float64, e.g. "Company Code" -> 1000.0). Concatenating a
+    # float64 column with a str column produces a mixed-type object column that
+    # pyarrow can't write -- align overlapping columns to a common dtype first.
+    if not df_existing.empty:
+        for col in set(df_existing.columns) & set(df_final.columns):
+            if df_existing[col].dtype != df_final[col].dtype:
+                try:
+                    df_final[col] = df_final[col].astype(df_existing[col].dtype)
+                except (ValueError, TypeError):
+                    df_existing[col] = df_existing[col].astype(str)
+                    df_final[col] = df_final[col].astype(str)
 
     combined = pd.concat([df_existing, df_final], ignore_index=True)
     out.parent.mkdir(parents=True, exist_ok=True)
