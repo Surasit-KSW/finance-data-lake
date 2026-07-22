@@ -36,10 +36,15 @@ if %ERRORLEVEL% EQU 0 (
     echo [%time%] Pipeline SUCCESS ✓ >> "%LOG_FILE%"
     echo Pipeline เสร็จสมบูรณ์ — ดู %LOG_FILE%
 ) else (
-    echo [%time%] Pipeline FAILED ✗ (exit code %ERRORLEVEL%) >> "%LOG_FILE%"
+    echo [%time%] Pipeline FAILED ✗ ^(exit code %ERRORLEVEL%^) >> "%LOG_FILE%"
     echo ERROR: Pipeline ล้มเหลว — ดู %LOG_FILE%
     exit /b 1
 )
+
+REM รัน script catalog scan + render (cross-repo discovery, ไม่ผูกกับ pipeline สำเร็จ/ล้มเหลว)
+echo [%time%] รัน scan_scripts.py + render_catalog.py ... >> "%LOG_FILE%"
+%PYTHON% "%LAKE_ROOT%\scripts\scan_scripts.py" >> "%LOG_FILE%" 2>&1
+%PYTHON% "%LAKE_ROOT%\scripts\render_catalog.py" >> "%LOG_FILE%" 2>&1
 
 echo [%date% %time%] เสร็จสิ้น >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"
