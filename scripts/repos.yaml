@@ -1,0 +1,22 @@
+repos:
+  - name: finance-ops-workspace
+    root: "D:/_Work_Workspace/03_Data_Projects/ai/finance-ops/workspace"
+    exclude_dirs: [tests, __pycache__, .venv, 02_Working]
+  - name: finance-data-lake
+    root: "D:/_Work_Workspace/03_Data_Projects/_Finance_Data_Lake"
+    exclude_dirs: [tests, __pycache__, .venv, 01_Bronze_Raw, 02_Silver_Cleaned, 03_Gold_DataMarts]
+  - name: sap-gui-automation
+    root: "D:/_Work_Workspace/03_Data_Projects/sap_gui_automation"
+    exclude_dirs: [tests, __pycache__, .venv]
+  - name: sap-cost-closing-app
+    root: "D:/_Work_Workspace/03_Data_Projects/sap_cost_closing_app"
+    exclude_dirs: [tests, __pycache__, .venv]
+  - name: tools
+    root: "D:/_Work_Workspace/03_Data_Projects/tools"
+    exclude_dirs: [__pycache__]
+  - name: accounting-agent
+    root: "D:/_Work_Workspace/03_Data_Projects/ai/accounting-agent"
+    exclude_dirs: [tests, __pycache__, .venv, node_modules]
+  - name: gi-cost-reports
+    root: "D:/_Work_Workspace/03_Data_Projects/active/gi-cost-reports"
+    exclude_dirs: [node_modules, output]
