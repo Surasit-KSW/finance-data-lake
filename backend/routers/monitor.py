@@ -114,7 +114,7 @@ PLANT_LABELS: dict[str, str] = {
 ALL_PLANTS = ["1300", "1100", "1200"]
 
 # Column name for production output qty in v_production (MB52 actual GR qty)
-PROD_QTY_COL = "GR_Qty"
+PROD_QTY_COL = "Actual GR QTY"
 PROD_AMT_COL = "Actual GR Amount"
 
 
@@ -181,11 +181,11 @@ def _query_gl_by_account(
     excl_ints = [int(a) for a in GL_EXCLUSION]
     excl_placeholders = _in_clause(excl_ints) if excl_ints else "(-1)"
     conds = [
-        "company_code = ?",
+        '"Company Code" = ?',
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
-        f"CAST(CAST(\"G/L Account\" AS DOUBLE) AS BIGINT) NOT IN {excl_placeholders}",
+        f"CAST(CAST(\"G/L Account\" AS DOUBLE PRECISION) AS BIGINT) NOT IN {excl_placeholders}",
     ]
     params: list = ["1000", year] + months + excl_ints
 
@@ -197,7 +197,7 @@ def _query_gl_by_account(
                 OR (
                     CAST("G/L Account" AS VARCHAR) LIKE '541%'
                     AND "Cost Center" IS NULL
-                    AND CAST(Reference AS VARCHAR) LIKE ?
+                    AND CAST("Reference" AS VARCHAR) LIKE ?
                 )
             )
         """)
@@ -241,14 +241,14 @@ def _query_production_volume(
     Plant in v_production is string (added by ETL from filename prefix).
     """
     # v_production columns are case-sensitive (quoted DDL): "Year", "Month", "Material", "Plant"
+    # NOTE: v_production has no company_code / "Company Code" column (single-company view) — no filter needed.
     conds = [
-        'company_code = ?',
         'CAST("Year" AS INTEGER) = ?',
         f'CAST("Month" AS INTEGER) IN {_in_clause(months)}',
         # Exclude semi-finished CRC (20CRC) — keep finished coated products
         '"Material" NOT LIKE \'20CRC%\'',
     ]
-    params: list = ["1000", year] + months
+    params: list = [year] + months
 
     if plant:
         conds.append('"Plant" = ?')
@@ -393,7 +393,7 @@ def _query_tb_amounts(
     Returns None on query error.
     """
     conds = [
-        "company_code = ?",
+        '"Company Code" = ?',
         "CAST(Year AS INTEGER) = ?",
         f"CAST(Month AS INTEGER) IN {_in_clause(months)}",
         "CAST(\"G/L Account\" AS VARCHAR) LIKE '5%'",
@@ -979,15 +979,15 @@ def get_pnl(
         gold_df = query_df(
             f"""
             SELECT
-                CAST(Month AS INTEGER)                    AS month,
-                CAST(CAST(Plant AS DOUBLE) AS BIGINT)     AS plant_int,
+                CAST(Month AS INTEGER)                              AS month,
+                CAST(CAST(Plant AS DOUBLE PRECISION) AS BIGINT)     AS plant_int,
                 revenue_thb                               AS revenue,
                 gp_actual                                 AS gp_actual,
                 qty_sold_st                               AS qty_sold_st
             FROM gold_gp_by_plant
             WHERE CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}
-              AND CAST(CAST(Plant AS DOUBLE) AS BIGINT) IN (1100, 1200, 1300)
+              AND CAST(CAST(Plant AS DOUBLE PRECISION) AS BIGINT) IN (1100, 1200, 1300)
             ORDER BY month, plant_int
             """,
             [year] + months,
@@ -1013,11 +1013,11 @@ def get_pnl(
                               OR CAST("G/L Account" AS VARCHAR) LIKE '532%')
                     THEN net_amount ELSE 0 END) AS conv_cost
             FROM v_gl
-            WHERE company_code = ?
+            WHERE "Company Code" = ?
               AND CAST(Year AS INTEGER) = ?
               AND CAST(Month AS INTEGER) IN {_in_clause(months)}
               AND CAST("G/L Account" AS VARCHAR) LIKE '5%'
-              AND CAST(CAST("G/L Account" AS DOUBLE) AS BIGINT) NOT IN {excl_ph}
+              AND CAST(CAST("G/L Account" AS DOUBLE PRECISION) AS BIGINT) NOT IN {excl_ph}
               AND (
                   CAST("Cost Center" AS VARCHAR) LIKE '11%'
                   OR CAST("Cost Center" AS VARCHAR) LIKE '12%'
@@ -1026,9 +1026,9 @@ def get_pnl(
                       CAST("G/L Account" AS VARCHAR) LIKE '541%'
                       AND "Cost Center" IS NULL
                       AND (
-                          CAST(Reference AS VARCHAR) LIKE '11%'
-                          OR CAST(Reference AS VARCHAR) LIKE '12%'
-                          OR CAST(Reference AS VARCHAR) LIKE '13%'
+                          CAST("Reference" AS VARCHAR) LIKE '11%'
+                          OR CAST("Reference" AS VARCHAR) LIKE '12%'
+                          OR CAST("Reference" AS VARCHAR) LIKE '13%'
                       )
                   )
               )
