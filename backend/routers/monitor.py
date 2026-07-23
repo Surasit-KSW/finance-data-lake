@@ -23,6 +23,7 @@ SAP sign convention (v_gl):
 """
 from fastapi import APIRouter, Query, HTTPException
 from backend.services.db_service import query_df
+from backend.core.config import settings
 
 router = APIRouter(prefix="/api/v1/monitor", tags=["Monitor v1"])
 
@@ -437,6 +438,9 @@ def _query_mb51_total_dm(year: int, months: list[int], plant: str) -> float | No
     function is used for total-level GL RM vs MB51 DM reconciliation only.
     Returns THB total or None if v_mb51 is unavailable or has no data.
     """
+    # v_mb51 not synced to Neon yet (Postgres) — skip the round trip, it always fails.
+    if settings.use_postgres:
+        return None
     try:
         sql = f"""
             SELECT SUM(gi_dm_amount) AS total_dm
@@ -466,6 +470,9 @@ def _query_mb51_rm_breakdown(
     Returns list of {material_type, label, amount_thb, pct_of_total}
     sorted by amount descending. Returns None if v_mb51 not available.
     """
+    # v_mb51 not synced to Neon yet (Postgres) — skip the round trip, it always fails.
+    if settings.use_postgres:
+        return None
     try:
         df = query_df(
             f"""
@@ -578,6 +585,9 @@ def _build_rm_material_rows(year: int, months: list[int], plant: str) -> list[di
 
     Returns None if v_mb51 is unavailable or returns no data.
     """
+    # v_mb51 not synced to Neon yet (Postgres) — skip the round trip, it always fails.
+    if settings.use_postgres:
+        return None
     try:
         df = query_df(
             f"""
